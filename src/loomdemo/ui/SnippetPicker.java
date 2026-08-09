@@ -43,7 +43,7 @@ public final class SnippetPicker {
     public SnippetPicker() {
         for (Snippet value : Snippet.values()) {
             ToggleButton button = new ToggleButton(value.label());
-            button.getStyleClass().addAll("mode-button", "snippet-button");
+            button.getStyleClass().addAll("mode-button", "segmented-button");
             button.setTooltip(new Tooltip(value.caption()));
             button.setToggleGroup(group);
             button.setUserData(value);

@@ -277,10 +277,12 @@
 }
 
 /*
- * Threads 101 comes before the past/future distinction exists, so its picker selects in
- * plain ink rather than borrowing either identity colour.
+ * Pickers that are not choosing a side: the Threads 101 snippet switch, which comes
+ * before the past/future distinction exists, and the Requests/Concurrency settings on the
+ * comparison tab, which apply to both sides equally. Both select in plain ink rather than
+ * borrowing either identity colour, so orange and teal keep meaning only one thing.
  */
-.snippet-button:selected {
+.segmented-button:selected {
     -fx-background-color: -ink;
     -fx-text-fill: -surface;
 }

@@ -152,7 +152,8 @@ yours during the warm-up run so you can quote it confidently.
 ### Demo 3 — Performance Comparison
 
 1. **Performance Comparison** tab. Defaults are `GET /order/{id}` (100 ms), 5,000
-   requests, 2,000 concurrent — these give the sharpest contrast.
+   requests, 2,000 concurrent — these give the sharpest contrast. **Requests** and
+   **Concurrency** are buttons, not dropdowns: one click, no popup to miss.
 2. Set the toggle to **Take me to the past**, press **Run**.
    - It briefly says *warming up connections…* — that is the load generator opening its
      connection pool before the clock starts. Then the orange line climbs on the chart.
@@ -232,6 +233,27 @@ console is cleared, so `cook-1` looks the same in run #3 as it did in run #1 —
 comparing one run against the one above it would mean nothing. The colours are deliberately
 neither orange nor teal: those two mean "before Loom" and "after Loom" everywhere else in
 the talk, and a `cook-1` that looked orange would quietly say something untrue.
+
+### Why the settings on tab 3 are buttons, not dropdowns
+
+**Requests** and **Concurrency** used to be `ComboBox`es. A JavaFX dropdown list lives in a
+separate native window, and on macOS that window intermittently paints blank: you click,
+get an empty rectangle, and the options only appear once you move the mouse across them.
+The list is never actually wrong — driving the control from a harness shows the right
+items, the right fonts and the right theme colours every time, and forcing a repaint draws
+them correctly. It is the window that does not get painted, which puts it out of reach of
+anything the application can do in CSS.
+
+For three fixed values that is not worth working around, so there is no popup any more:
+every option is a `ToggleButton` that is always on screen. It is also one click instead of
+two and readable from the back of the room, which is what the rest of this app optimises
+for. `SegmentedPicker` is the shared widget; the Threads 101 snippet switch is the same
+shape.
+
+**Endpoint is still a dropdown.** Its three labels are HTTP paths, and side by side they
+push the control row to three lines at presentation font sizes. If it ever glitches on
+stage, click it a second time — and the same treatment would work there if you are willing
+to shorten the labels.
 
 ### Tab 3 measures a real server
 

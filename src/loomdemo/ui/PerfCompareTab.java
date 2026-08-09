@@ -16,7 +16,6 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
-import javafx.util.StringConverter;
 import loomdemo.DemoTab;
 import loomdemo.Mode;
 import loomdemo.load.LoadGenerator;
@@ -40,8 +39,19 @@ public final class PerfCompareTab implements DemoTab {
 
     private final ModeToggle modeToggle = new ModeToggle();
     private final ComboBox<OrderServer.Endpoint> endpointBox = new ComboBox<>();
-    private final ComboBox<Integer> requestsBox = new ComboBox<>();
-    private final ComboBox<Integer> concurrencyBox = new ComboBox<>();
+
+    /*
+     * Buttons, not dropdowns. Three fixed numbers each, and a ComboBox popup is a native
+     * window that intermittently paints blank on macOS until the mouse moves over it —
+     * which is exactly the wrong failure to hit while a room is watching. See
+     * SegmentedPicker. Endpoint stays a dropdown because its three labels are HTTP paths
+     * and laying them out side by side would take the control row to three lines in
+     * presentation mode.
+     */
+    private final SegmentedPicker<Integer> requestsPicker =
+            new SegmentedPicker<>(REQUEST_OPTIONS, PerfCompareTab::thousands, 5_000);
+    private final SegmentedPicker<Integer> concurrencyPicker =
+            new SegmentedPicker<>(CONCURRENCY_OPTIONS, PerfCompareTab::thousands, 2_000);
 
     private final Button runButton = new Button("▶  Run");
     private final Button stopButton = new Button("Stop");
@@ -110,23 +120,17 @@ public final class PerfCompareTab implements DemoTab {
         endpointBox.setTooltip(new Tooltip(
                 "Which handler to hit. Each one just sleeps for its latency and returns JSON."));
 
-        requestsBox.getItems().setAll(REQUEST_OPTIONS);
-        requestsBox.getSelectionModel().select(Integer.valueOf(5_000));
-        requestsBox.setConverter(thousandsConverter());
-        requestsBox.setTooltip(new Tooltip("Total requests to send in the timed run."));
-
-        concurrencyBox.getItems().setAll(CONCURRENCY_OPTIONS);
-        concurrencyBox.getSelectionModel().select(Integer.valueOf(2_000));
-        concurrencyBox.setConverter(thousandsConverter());
-        concurrencyBox.setTooltip(new Tooltip(
+        Tooltip.install(requestsPicker.getNode(),
+                new Tooltip("Total requests to send in the timed run."));
+        Tooltip.install(concurrencyPicker.getNode(), new Tooltip(
                 "How many requests are in flight at once.\n"
                         + "The contrast is sharpest when this is well above the server's "
                         + "200-thread pool."));
 
         Runnable onConfigChange = this::refreshMismatchWarning;
         endpointBox.valueProperty().addListener((o, a, b) -> onConfigChange.run());
-        requestsBox.valueProperty().addListener((o, a, b) -> onConfigChange.run());
-        concurrencyBox.valueProperty().addListener((o, a, b) -> onConfigChange.run());
+        requestsPicker.valueProperty().addListener((o, a, b) -> onConfigChange.run());
+        concurrencyPicker.valueProperty().addListener((o, a, b) -> onConfigChange.run());
 
         runButton.setOnAction(e -> runDemo());
         runButton.setTooltip(new Tooltip("Run this config against the server  (⌘R)"));
@@ -141,8 +145,7 @@ public final class PerfCompareTab implements DemoTab {
 
         status.getStyleClass().add("elapsed-timer");
 
-        for (Region control : new Region[]{endpointBox, requestsBox, concurrencyBox,
-                runButton, stopButton, resetButton}) {
+        for (Region control : new Region[]{endpointBox, runButton, stopButton, resetButton}) {
             // Never shrink a control below the width of its own text. Combined with the
             // FlowPane below, a too-narrow window wraps the row instead of turning every
             // label into "...".
@@ -151,8 +154,8 @@ public final class PerfCompareTab implements DemoTab {
 
         FlowPane row = new FlowPane(10, 8,
                 field("Endpoint", endpointBox),
-                field("Requests", requestsBox),
-                field("Concurrency", concurrencyBox),
+                field("Requests", requestsPicker.getNode()),
+                field("Concurrency", concurrencyPicker.getNode()),
                 field("", modeToggle.getNode()),
                 field("", runButton),
                 field("", stopButton),
@@ -238,18 +241,8 @@ public final class PerfCompareTab implements DemoTab {
         return label;
     }
 
-    private static StringConverter<Integer> thousandsConverter() {
-        return new StringConverter<>() {
-            @Override
-            public String toString(Integer value) {
-                return value == null ? "" : String.format(Locale.US, "%,d", value);
-            }
-
-            @Override
-            public Integer fromString(String text) {
-                return Integer.valueOf(text.replace(",", "").trim());
-            }
-        };
+    private static String thousands(Integer value) {
+        return value == null ? "" : String.format(Locale.US, "%,d", value);
     }
 
     // ----------------------------------------------------------------- execution
@@ -261,8 +254,8 @@ public final class PerfCompareTab implements DemoTab {
         }
         Mode mode = modeToggle.getMode();
         OrderServer.Endpoint endpoint = endpointBox.getValue();
-        int total = requestsBox.getValue();
-        int concurrency = concurrencyBox.getValue();
+        int total = requestsPicker.getValue();
+        int concurrency = concurrencyPicker.getValue();
 
         setRunning(true);
         status.setText("starting server…");
@@ -396,8 +389,8 @@ public final class PerfCompareTab implements DemoTab {
         resetButton.setDisable(running);
         modeToggle.setDisable(running);
         endpointBox.setDisable(running);
-        requestsBox.setDisable(running);
-        concurrencyBox.setDisable(running);
+        requestsPicker.setDisable(running);
+        concurrencyPicker.setDisable(running);
     }
 
     @Override
