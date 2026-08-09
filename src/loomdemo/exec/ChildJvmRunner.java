@@ -58,6 +58,7 @@ public final class ChildJvmRunner {
     private volatile Process process;
     private volatile boolean stoppedByUser;
     private Timeline drainTimeline;
+    /** Temp directory to delete when the run ends. Null when someone else owns it. */
     private Path workDir;
     private long startNanos;
 
@@ -77,31 +78,64 @@ public final class ChildJvmRunner {
             return;
         }
 
-        pending.clear();
-        stoppedByUser = false;
-        startNanos = System.nanoTime();
-
+        Path dir;
         Path sourceFile;
         try {
-            workDir = Files.createTempDirectory("loom-demo-");
-            workDir.toFile().deleteOnExit();
+            dir = Files.createTempDirectory("loom-demo-");
+            dir.toFile().deleteOnExit();
             // The source launcher requires the file name to match the public class, and
             // the presenter is allowed to rename that class mid-talk.
-            sourceFile = workDir.resolve(detectClassName(source) + ".java");
+            sourceFile = dir.resolve(detectClassName(source) + ".java");
             Files.writeString(sourceFile, source, StandardCharsets.UTF_8);
             sourceFile.toFile().deleteOnExit();
         } catch (IOException e) {
             listener.onError("Could not write the temp source file: " + e);
             return;
         }
+        workDir = dir;
 
         List<String> command = new ArrayList<>();
         command.add(javaBinary());
         command.addAll(jvmArgs);
         command.add(sourceFile.toString());
 
+        launch(command, dir, listener);
+    }
+
+    /**
+     * Run classes that have already been compiled, skipping the source launcher's
+     * compile step entirely.
+     *
+     * <p>This exists for Threads 101, where the presenter presses Run over and over to
+     * show that the output order changes. Recompiling from source each time costs most of
+     * a second — long enough to break the rhythm of "run it again". {@code classDir}
+     * belongs to the caller and is never deleted here.
+     */
+    public void startCompiled(Path classDir, String mainClass, List<String> jvmArgs,
+            Listener listener) {
+        if (isRunning()) {
+            listener.onError("A run is already in progress.");
+            return;
+        }
+        workDir = null;   // the compiler owns classDir; cleanUp() must leave it alone
+
+        List<String> command = new ArrayList<>();
+        command.add(javaBinary());
+        command.addAll(jvmArgs);
+        command.add("-cp");
+        command.add(classDir.toString());
+        command.add(mainClass);
+
+        launch(command, classDir, listener);
+    }
+
+    private void launch(List<String> command, Path directory, Listener listener) {
+        pending.clear();
+        stoppedByUser = false;
+        startNanos = System.nanoTime();
+
         ProcessBuilder builder = new ProcessBuilder(command);
-        builder.directory(workDir.toFile());
+        builder.directory(directory.toFile());
         // stderr is merged so stack traces land inline, in the order they happened.
         builder.redirectErrorStream(true);
         // A stray JAVA_TOOL_OPTIONS on the presenting machine would silently change the
@@ -115,6 +149,7 @@ public final class ChildJvmRunner {
         try {
             started = builder.start();
         } catch (IOException e) {
+            cleanUp();   // don't leak the temp dir we just wrote
             listener.onError("Could not launch the child JVM: " + e);
             return;
         }

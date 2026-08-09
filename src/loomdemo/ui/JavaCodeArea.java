@@ -3,6 +3,7 @@ package loomdemo.ui;
 import javafx.animation.PauseTransition;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
+import javafx.beans.value.ObservableValue;
 import javafx.scene.layout.Region;
 import javafx.util.Duration;
 import org.fxmisc.flowless.VirtualizedScrollPane;
@@ -85,6 +86,14 @@ public final class JavaCodeArea {
 
     public String getSource() {
         return area.getText();
+    }
+
+    /**
+     * The live buffer contents. Threads 101 watches this to precompile in the background
+     * shortly after the presenter stops typing.
+     */
+    public ObservableValue<String> sourceProperty() {
+        return area.textProperty();
     }
 
     /** True when the presenter has edited the buffer since the template was loaded. */
