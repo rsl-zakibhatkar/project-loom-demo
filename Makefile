@@ -132,6 +132,12 @@ verify: runtime
 	@printf 'public class Hello { public static void main(String[] a) { System.out.println("source-launcher-ok on " + Runtime.version()); } }\n' > build/Hello.java
 	@cd build && ./runtime/bin/java Hello.java
 	@echo "==> Bundled runtime can run single-file .java sources. Thread Bomb will work when packaged."
+# Threads 101 precompiles snippets in-process so re-running is instant. That needs the
+# javac ToolProvider, which only exists if jdk.compiler survived jlink. `make run` uses
+# the full JDK and would never catch its absence — this does, before the dmg ships.
+	@printf 'import java.util.spi.ToolProvider;\npublic class Tool { public static void main(String[] a) throws Exception {\n  var javac = ToolProvider.findFirst("javac").orElseThrow(() -> new IllegalStateException("no javac ToolProvider in the bundled runtime"));\n  java.nio.file.Path d = java.nio.file.Files.createTempDirectory("verify-");\n  java.nio.file.Path s = d.resolve("Tiny.java");\n  java.nio.file.Files.writeString(s, "public class Tiny { public static void main(String[] a) {} }");\n  int rc = javac.run(System.out, System.err, "-d", d.toString(), s.toString());\n  if (rc != 0 || !java.nio.file.Files.exists(d.resolve("Tiny.class"))) throw new IllegalStateException("javac ToolProvider failed, rc=" + rc);\n  System.out.println("tool-provider-javac-ok");\n} }\n' > build/Tool.java
+	@cd build && ./runtime/bin/java Tool.java
+	@echo "==> Bundled runtime can compile in-process. Threads 101 fast re-runs will work when packaged."
 
 dmg: jar runtime verify
 	@rm -rf dist

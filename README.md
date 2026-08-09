@@ -1,7 +1,13 @@
 # Loom Stage Demo
 
 A macOS desktop app for a live conference talk about Java Project Loom and virtual
-threads. Two demos, switchable via tabs, each with a past/future toggle:
+threads. Three demos, switchable via tabs:
+
+1. **Threads 101** — what a thread is, in ten lines you can re-run on demand
+2. **Thread Bomb** — what platform threads cost
+3. **Performance Comparison** — what that cost does to a server
+
+Demos 2 and 3 carry a past/future toggle:
 
 - **Take me to the past** — platform threads, bounded pools · orange `#FFAB40`
 - **Take me to the future** — virtual threads · teal `#0097A7`
@@ -74,7 +80,7 @@ xattr -dr com.apple.quarantine "/Applications/Loom Demo.app"
 | --- | --- |
 | `⌘R` | Run the current tab's demo |
 | `⌘.` | Stop |
-| `⌘K` | Clear console (tab 1) / reset stats (tab 2) |
+| `⌘K` | Clear console (tabs 1 and 2) / reset stats (tab 3) |
 | `⌘P` | Toggle presentation mode (+30% on every font) |
 | `⌘D` | Toggle light/dark |
 
@@ -91,12 +97,35 @@ themes wash out badly on cheap hardware.
 1. Launch the app once and leave it open. Startup is about a second, but do it anyway.
 2. Turn on **Presentation** if the room is deep.
 3. Switch to the **light theme** unless you have checked the projector.
-4. Run each demo once as a warm-up, then `⌘K` on both tabs. First runs are always the
+4. Run each demo once as a warm-up, then `⌘K` on all three tabs. First runs are always the
    slowest, and you would rather spend that on your own laptop than on stage.
-5. Plug in the power cable. Both demos are CPU-heavy for a few seconds and laptops
+5. Plug in the power cable. Demos 2 and 3 are CPU-heavy for a few seconds and laptops
    throttle hard on battery.
 
-### Demo 1 — Thread Bomb
+### Demo 1 — Threads 101
+
+The app opens here. Three snippets, left to right, in the order you want them.
+
+1. **Two Cooks** is preselected. Two threads, five lines each. Talk over the code, then
+   **Run** (`⌘R`). `cook-1` and `cook-2` come back in two different colours.
+2. **Run it again. And again.** This is the whole demo. Each run is separated by a
+   `──── Run #N ────` rule and the console *keeps* the earlier runs, so three runs stack up
+   on screen and the audience can see for themselves that the order changed and the code
+   did not. Re-running is instant — about 25 ms to the first line — so you can press it
+   three times in a row without a pause to talk over.
+3. Ask what would happen if you called `run()` instead of `start()`, take a guess from the
+   room, then switch to **run() vs start()**. Same code, two characters different. Every
+   line now says `main`, in one colour, in order. Nobody argues with that.
+4. Finish on **Who's in my JVM?** — a program that starts no threads at all and still
+   finds six. "You have never written a single-threaded program."
+
+The caption above the editor changes with each snippet and says what to look for. The code
+is editable: change `i < 5` to `i < 20` and re-run if you want a longer interleave.
+
+**If you edit the code and then switch snippets**, an inline bar asks before replacing it.
+**Reset** restores the original snippet.
+
+### Demo 2 — Thread Bomb
 
 1. **Thread Bomb** tab. Toggle is on **Take me to the past**.
 2. Talk over the code on the left. It is real, runnable, and editable — change the sleep
@@ -116,7 +145,7 @@ around 2,000 on an M2 (`kern.num_taskthreads` is 2048), higher on machines with 
 limit. It varies per machine and that is fine; the gap to 1,000,000 is the point. Check
 yours during the warm-up run so you can quote it confidently.
 
-### Demo 2 — Performance Comparison
+### Demo 3 — Performance Comparison
 
 1. **Performance Comparison** tab. Defaults are `GET /order/{id}` (100 ms), 5,000
    requests, 2,000 concurrent — these give the sharpest contrast.
@@ -148,11 +177,12 @@ comparison is invalid. Re-run one side to match.
 
 | Symptom | What to do |
 | --- | --- |
-| A run seems stuck | `⌘.` (Stop). Tab 1 kills the child JVM; tab 2 abandons the load test and **keeps the previous result on screen**, so you never lose a filled panel to a bad run. |
-| Console is cluttered | `⌘K`. On tab 2 this resets both panels and the chart, so only use it if you mean it. |
+| A run seems stuck | `⌘.` (Stop). Tabs 1 and 2 kill the child JVM; tab 3 abandons the load test and **keeps the previous result on screen**, so you never lose a filled panel to a bad run. |
+| Console is cluttered | `⌘K`. On tab 1 this also resets the run counter back to #1. On tab 3 it resets both panels and the chart, so only use it if you mean it. |
+| Two Cooks produced the same order twice | Say so — it is genuinely random, not guaranteed to differ. Run it once more. Two identical runs followed by a different one makes the point better than a lecture would. |
 | Thread bomb dies at a surprising number | Say the number out loud and move on. It is machine-specific and the contrast is unaffected. |
 | Errors appear on a stats panel | Hover the errors figure for the actual failure kinds. Most likely something else on the machine is holding ports or CPU. Press Stop, then Run again. |
-| The code got edited into something broken | **Reset** button above the editor restores the original source for that mode. |
+| The code got edited into something broken | **Reset** button above the editor restores the original source for that mode or snippet. If you run it broken first, the real `javac` error appears in the console — which is a fine thing to show on purpose. |
 | An unexpected error | It goes to the output console, not a crash dialog. The window will not go down with the demo — that is the whole reason the thread bomb runs in a child JVM. |
 | Total disaster | Quit and relaunch. Startup is ~1s and no state is needed to re-run either demo. |
 
@@ -160,7 +190,7 @@ comparison is invalid. Re-run one side to match.
 
 ## How it works
 
-### Tab 1 runs your code in a different JVM
+### Tabs 1 and 2 run your code in a different JVM
 
 The past-mode program deliberately exhausts the OS thread limit. Running it in the app's
 own process would take the window down with it. Instead the editor's contents are written
@@ -177,7 +207,29 @@ Two output lines are load-bearing: `Died at thread #N` and `Completed 1,000,000 
 Xs`. The app watches for those and promotes them to the punchline banner and the
 scoreboard. Edit them live and the demo still runs, you just lose the banner.
 
-### Tab 2 measures a real server
+### Threads 101 compiles ahead of time so re-runs are instant
+
+The source launcher recompiles on every launch, which costs about 250 ms before the first
+line of output. That is invisible in Thread Bomb, where the program then runs for seconds.
+It is not invisible in a demo whose entire point is pressing Run three times in a row. So
+Threads 101 compiles the snippet in the background whenever the editor settles, and Run
+then only has to start a JVM: about **25 ms** to the first line instead of 250.
+
+If the snippet is not compiled yet, or the presenter has just broken it, the app silently
+falls back to the source launcher — same behaviour the other tab has always had, and it is
+that fallback that puts the real `javac` error on screen.
+
+Compilation happens in-process through the `javac` `ToolProvider`, so the jlinked runtime
+needs `jdk.compiler` — which it already did, for the source launcher. `make verify` checks
+both, because neither failure would ever show up in `make run`.
+
+Console lines are tinted by which thread printed them. A name keeps its colour until the
+console is cleared, so `cook-1` looks the same in run #3 as it did in run #1 — otherwise
+comparing one run against the one above it would mean nothing. The colours are deliberately
+neither orange nor teal: those two mean "before Loom" and "after Loom" everywhere else in
+the talk, and a `cook-1` that looked orange would quietly say something untrue.
+
+### Tab 3 measures a real server
 
 `com.sun.net.httpserver` on loopback, ephemeral port. Every handler is one
 `Thread.sleep()` standing in for a database call. Changing mode restarts the server with a
