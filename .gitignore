@@ -1,0 +1,6 @@
+/tools/
+/libs/
+/out/
+/build/
+/dist/
+.DS_Store
