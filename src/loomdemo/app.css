@@ -559,7 +559,12 @@
 
 /* -------------------------------------------------------------- stats panels */
 
-.stats-panel {
+/*
+ * The era-bordered frame, worn by both the stats panels and the Break it trace panels.
+ * They are listed separately rather than sharing one class so that ".stats-panel" still
+ * means a stats panel and nothing else — the two are told apart by name elsewhere.
+ */
+.stats-panel, .trace-panel {
     -fx-background-color: -surface;
     -fx-border-width: 2;
     -fx-background-radius: 0.5em;
@@ -567,15 +572,15 @@
     -fx-padding: 0;
 }
 
-.stats-panel.past {
+.stats-panel.past, .trace-panel.past {
     -fx-border-color: -past-accent;
 }
 
-.stats-panel.future {
+.stats-panel.future, .trace-panel.future {
     -fx-border-color: -future-accent;
 }
 
-.stats-panel.workaround {
+.stats-panel.workaround, .trace-panel.workaround {
     -fx-border-color: -workaround-accent;
 }
 
@@ -689,6 +694,108 @@
     -fx-padding: 0.4em 0.8em 0.4em 0.8em;
     -fx-background-color: -workaround-wash;
     -fx-background-radius: 0.5em;
+    -fx-alignment: center;
+}
+
+/* ------------------------------------------------------------------ break it */
+
+/*
+ * The stack trace panels. RichTextFX again, so these spans are Text nodes and take
+ * -fx-fill, not -fx-text-fill — the same trap as .stream-console and .code-area.
+ */
+.trace-console {
+    -fx-background-color: -surface;
+}
+
+.trace-console .text {
+    -fx-font-family: "SF Mono", "Menlo", "Monaco", monospace;
+    -fx-font-size: 0.95em;
+    -fx-fill: -ink-muted;
+}
+
+.trace-console .caret {
+    -fx-stroke: transparent;
+}
+
+.trace-console .selection {
+    -fx-fill: #0097A755;
+}
+
+/* The exception line, "Caused by:", "Suppressed:". */
+.trace-console .trace-header {
+    -fx-fill: -ink;
+    -fx-font-weight: bold;
+}
+
+/* Frames in this application: where the failure actually happened. */
+.trace-console .trace-mine {
+    -fx-fill: -danger;
+    -fx-font-weight: bold;
+}
+
+/*
+ * Frames naming the HTTP server's request path, in the panel's own identity colour.
+ *
+ * Scoped per era on purpose: the async panel has none of these, so its violet never
+ * appears in its trace at all. The absence of the colour is the exhibit.
+ */
+.trace-console.past .trace-request { -fx-fill: -past-ink; -fx-font-weight: bold; }
+.trace-console.future .trace-request { -fx-fill: -future-ink; -fx-font-weight: bold; }
+.trace-console.workaround .trace-request { -fx-fill: -workaround-ink; -fx-font-weight: bold; }
+
+/* The JDK, the executor, the CompletableFuture machinery. Present but receding. */
+.trace-console .trace-framework {
+    -fx-fill: -ink-muted;
+}
+
+.trace-console .trace-elision {
+    -fx-fill: -ink-muted;
+    -fx-font-style: italic;
+}
+
+/* The count under each panel. */
+.trace-count {
+    -fx-font-family: "SF Mono", "Menlo", "Monaco", monospace;
+    -fx-font-size: 1.05em;
+    -fx-font-weight: bold;
+    -fx-padding: 0.3em 0.6em 0.3em 0.6em;
+    -fx-background-radius: 0.4em;
+}
+
+.trace-count.past { -fx-text-fill: -past-ink; -fx-background-color: -past-wash; }
+.trace-count.future { -fx-text-fill: -future-ink; -fx-background-color: -future-wash; }
+.trace-count.workaround {
+    -fx-text-fill: -workaround-ink;
+    -fx-background-color: -workaround-wash;
+}
+
+/* A zero here is the point being made, so it is allowed to shout. */
+.trace-count.zero {
+    -fx-font-size: 1.2em;
+    -fx-text-fill: -danger;
+}
+
+.trace-count.empty {
+    -fx-text-fill: -ink-muted;
+    -fx-background-color: transparent;
+}
+
+.trace-body {
+    -fx-padding: 0.6em 0.7em 0.7em 0.7em;
+}
+
+/* Sized with the throughput headline, not below it: this is the other punchline. */
+.break-line {
+    -fx-font-size: 1.9em;
+    -fx-font-weight: bold;
+    -fx-text-fill: -ink;
+    -fx-wrap-text: true;
+    -fx-padding: 0.45em 0.8em 0.45em 0.8em;
+    -fx-background-color: -surface;
+    -fx-border-color: -hairline;
+    -fx-border-width: 1;
+    -fx-background-radius: 0.5em;
+    -fx-border-radius: 0.5em;
     -fx-alignment: center;
 }
 

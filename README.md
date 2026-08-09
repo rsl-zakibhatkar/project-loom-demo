@@ -201,6 +201,22 @@ your warm-up run does not die, raise the sleep in the editor and it will.
    - The workaround needs **25 lines**, a `CompletableFuture` chain, a second method to
      write the response, and a `catch` block with nowhere to throw to.
    - **`That is the whole talk.`** Same throughput. One of them is code you can debug.
+7. **Then prove the last sentence.** Press **Break it**. One request goes to an endpoint
+   that always fails, through both handler shapes, and the two real stack traces come back
+   side by side. No load test, no waiting.
+   - Both traces name `callPaymentGateway`. Say so first — you are not claiming async
+     loses your code.
+   - The blocking trace also carries the request: `Filter.doFilter`, `Exchange.run`,
+     six frames of it, in the era's own colour. The async trace has **none** — it bottoms
+     out at `AsyncSupply.run` on a pool worker.
+   - The counts underneath read **6** and **0**.
+   - **`Same failure. One trace tells you where.`**
+
+**If someone says "just call getCause()"** — they are right, and the panel already shows
+the `Caused by:` section with all three of your frames in it. Point at it. Then point at
+what unwrapping cannot give back: the request is not on that stack at any depth. That is
+what the counter counts, and it is why it says frames tying this to a *request* rather
+than frames from your code.
 
 **Say this out loud**: the handler code is identical in both runs. The only thing that
 changed is the executor the server hands requests to. And the load generator uses virtual
@@ -226,6 +242,8 @@ comparison is invalid. Re-run one side to match.
 | The workaround beat virtual threads | Expected, and fine. They are the same number and the run-to-run spread is wider than the gap. Say "same speed" and move to the handlers — that is where the argument actually is. |
 | Thread bomb dies at a surprising number | Say the number out loud and move on. It is machine-specific and the contrast is unaffected. |
 | The thread bomb does not die at all | Only possible on a machine whose thread limit is high enough that creation outruns the one-second sleep. Change `Duration.ofSeconds(1)` to `ofMinutes(1)` in the editor and run again — the past side dies for certain, and you simply stop before running the present side, which would now never finish. |
+| Break it shows an error in a panel | It could not reach the server. Press **Show the chart** and then **Break it** again — it rebinds the server each time, so a second attempt is a fresh start. The error stays inside the panel and takes nothing else down. |
+| Someone says async keeps the stack trace | Agree, and show them: the `Caused by:` section is right there with all three frames. Then read the counts out loud — the request path is 6 against 0, and `getCause()` does not bring it back. |
 | Someone says the two programs are different | Scroll the console to the `$ java …` line: it is identical in both runs. Then put the two sources side by side — one word, one line. That is the whole answer. |
 | Errors appear on a stats panel | Hover the errors figure for the actual failure kinds. Most likely something else on the machine is holding ports or CPU. Press Stop, then Run again. |
 | The code got edited into something broken | **Reset** button above the editor restores the original source for that mode or snippet. If you run it broken first, the real `javac` error appears in the console — which is a fine thing to show on purpose. |
@@ -333,6 +351,47 @@ with a different executor:
 
 Past and present share a handler byte for byte. Only the workaround needs different code,
 and that is the argument the tab is making.
+
+### Break it counts request frames, not "your" frames
+
+The obvious version of this exhibit counts frames belonging to the app and shows 3 against
+0. That version is wrong, and it would not survive the first sharp question.
+
+`.exceptionally(failure -> …)` receives a `CompletionException`. Its *own* stack trace is
+pure `CompletableFuture` machinery — but it wraps the original `IllegalStateException`,
+which was constructed inside `callPaymentGateway`, so a `Caused by:` section carries all
+three of the app's frames. "3 against 0" is only true if the panel hides that section, and
+someone who says *"just call `getCause()`"* would be right.
+
+So the panel shows the whole trace, cause included, and counts something that is genuinely
+zero on one side: frames naming the HTTP server's request path. Measured on this JDK:
+
+| | total frames | app | request path |
+| --- | --- | --- | --- |
+| past, blocking | 12 | 3 | **6** |
+| workaround, async | 10 | 3 (under `Caused by:`) | **0** |
+| present, blocking | 11 | 3 | **6** |
+
+Both traces name the payment gateway. Only one says a request was involved — and no amount
+of unwrapping puts it back, because it was never on that stack. That is exactly the claim
+the async handler's own comment makes, and now the tab demonstrates it.
+
+Two consequences worth knowing before editing any of it:
+
+- **`/order/boom` is deliberately not an `Endpoint` constant.** The tab fills its endpoint
+  dropdown straight from `Endpoint.values()`, so a fourth constant would offer the
+  presenter a handler that throws on every request as a target for a 5,000-request load
+  test. It is registered as its own context and only Break it ever asks for it.
+- **The mid-trace truncator is set to collapse runs of 8+ framework frames, and never
+  fires on a real trace here.** The async trace's longest framework run is *six* —
+  `encodeThrowable`, `completeThrowable`, `AsyncSupply.run`, `runWorker`, `Worker.run`,
+  `Thread.run` — and those six frames are the pool worker the whole exhibit is about.
+  Collapsing them would hide the point. The threshold exists for a pathologically deep
+  trace on some other runtime; the harness asserts it stays dormant.
+
+Break it rebinds the server to each era in turn to get a real trace from each, preferring
+whichever era is already running so a warm server costs nothing. It never runs a load test,
+and it does not need one to have been run.
 
 ### The workaround era genuinely does not block
 

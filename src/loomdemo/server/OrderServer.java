@@ -7,6 +7,8 @@ import loomdemo.Era;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -43,6 +45,29 @@ public final class OrderServer {
 
     /** Backlog request; macOS clamps this to {@code kern.ipc.somaxconn} regardless. */
     private static final int BACKLOG = 1024;
+
+    /**
+     * The endpoint that always fails, for the tab's "Break it" view.
+     *
+     * <p>Deliberately <em>not</em> an {@link Endpoint} constant. The tab populates its
+     * endpoint dropdown straight from {@code Endpoint.values()}, so a fourth constant would
+     * offer the presenter a handler that throws on every request as a target for a
+     * 5,000-request load test. It is registered as its own context instead, and only the
+     * Break it button ever asks for it.
+     *
+     * <p>Longest-prefix routing means this wins over the {@code /order/} context.
+     */
+    public static final String BOOM_PATH = "/order/boom";
+
+    /**
+     * Simulated I/O before the failure, on the async side only.
+     *
+     * <p>Short, because nobody is waiting on a chart here — but not zero. It forces the
+     * {@code supplyAsync} stage onto the delayed executor before it throws, which is the
+     * entire point of the exhibit: the failure has to happen <em>after</em> the thread hop,
+     * or the trace would still be sitting on the handler's own stack.
+     */
+    private static final int BOOM_LATENCY_MILLIS = 20;
 
     static {
         // com.sun.net.httpserver keeps at most 200 idle keep-alive connections and slams
@@ -144,6 +169,11 @@ public final class OrderServer {
                     : handlerFor(endpoint.latencyMillis());
             created.createContext(endpoint.path(), handler);
         }
+
+        // Same split, same reason: past and present share one, the workaround needs its own.
+        created.createContext(BOOM_PATH, era == Era.WORKAROUND
+                ? asyncBoomHandler(createdExecutor)
+                : boomHandler());
 
         created.setExecutor(createdExecutor);
         created.start();
@@ -305,14 +335,108 @@ public final class OrderServer {
                 .whenComplete((ignored, failure) -> exchange.close());
     }
 
+    // ------------------------------------------------------------------ break it
+
+    /*
+     * The same failure, reached the same way, through both handler shapes. What differs is
+     * what you can read afterwards.
+     *
+     * Measured on this JDK (21.0.12): the blocking trace carries 12 frames, 3 of them ours
+     * and 6 of them the server's own request path — Filter$Chain.doFilter, AuthFilter,
+     * ServerImpl$Exchange.run. The async trace carries 10 frames and NONE of the request
+     * path: it bottoms out at AsyncSupply.run on a pool worker.
+     *
+     * Both traces name callPaymentGateway. The async one only does so under "Caused by:",
+     * and the tab shows that section rather than hiding it — "just call getCause()" is a
+     * fair objection and the exhibit has to survive it. What getCause() cannot give back is
+     * the request: it is not on that stack at all, at any depth.
+     */
+
+    /** PAST and PRESENT share this one, exactly as they share {@link #handlerFor}. */
+    private static HttpHandler boomHandler() {
+        return exchange -> {
+            try {
+                loadOrder(idFrom(exchange));
+                respond(exchange, 200, null);   // never reached
+            } catch (Throwable failure) {
+                respondTrace(exchange, failure);
+            } finally {
+                exchange.close();
+            }
+        };
+    }
+
+    /**
+     * The workaround era's version. {@code loadOrder} is called <em>inside</em> the
+     * {@code supplyAsync} supplier, so it runs on the delayed executor and the thread hop
+     * has already happened when it throws. Failing any earlier — in the handler body, before
+     * the stage — would leave the handler's own frame on the stack and prove nothing.
+     */
+    private static HttpHandler asyncBoomHandler(Executor eventLoop) {
+        return exchange -> CompletableFuture
+                .supplyAsync(() -> loadOrder(idFrom(exchange)),
+                        CompletableFuture.delayedExecutor(
+                                BOOM_LATENCY_MILLIS, TimeUnit.MILLISECONDS, eventLoop))
+                .thenAccept(order -> respond(exchange, 200, null))
+                .exceptionally(failure -> {
+                    respondTrace(exchange, failure);
+                    return null;
+                })
+                .whenComplete((ignored, failure) -> exchange.close());
+    }
+
+    /*
+     * Two methods rather than one, so there are real frames to lose. A single throwing
+     * method would give a trace so short that "which frames survived" would not be a
+     * question worth asking.
+     */
+
+    private static String loadOrder(String id) {
+        return callPaymentGateway(id);
+    }
+
+    private static String callPaymentGateway(String id) {
+        throw new IllegalStateException("payment gateway timeout");
+    }
+
+    /**
+     * Serialise the failure and send it back as the response body.
+     *
+     * <p>{@code printStackTrace} rather than anything hand-rolled: the {@code Caused by:}
+     * section and the JDK's own {@code ... N more} elision have to be the real ones, or the
+     * exhibit is just this app's opinion about stack traces.
+     */
+    private static void respondTrace(HttpExchange exchange, Throwable failure) {
+        StringWriter text = new StringWriter();
+        failure.printStackTrace(new PrintWriter(text));
+        respond(exchange, 500, text.toString().getBytes(StandardCharsets.UTF_8),
+                "text/plain; charset=utf-8");
+    }
+
+    private static String idFrom(HttpExchange exchange) {
+        String path = exchange.getRequestURI().getPath();
+        int slash = path.lastIndexOf('/');
+        return slash >= 0 && slash < path.length() - 1 ? path.substring(slash + 1) : "0";
+    }
+
+    /** Where the Break it button sends its one request. */
+    public static String boomUrl(int port) {
+        return "http://127.0.0.1:" + port + BOOM_PATH;
+    }
+
     /** The response write the blocking handler got for free from try-with-resources. */
     private static void respond(HttpExchange exchange, int status, byte[] body) {
+        respond(exchange, status, body, "application/json");
+    }
+
+    private static void respond(HttpExchange exchange, int status, byte[] body,
+                                String contentType) {
         try {
             if (body == null) {
                 exchange.sendResponseHeaders(status, -1);
                 return;
             }
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.getResponseHeaders().set("Content-Type", contentType);
             exchange.sendResponseHeaders(status, body.length);
             try (OutputStream out = exchange.getResponseBody()) {
                 out.write(body);

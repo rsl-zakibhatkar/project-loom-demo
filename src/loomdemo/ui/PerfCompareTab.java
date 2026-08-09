@@ -19,10 +19,12 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import loomdemo.DemoTab;
 import loomdemo.Era;
+import loomdemo.load.BreakProbe;
 import loomdemo.load.LoadGenerator;
 import loomdemo.load.RunResult;
 import loomdemo.server.OrderServer;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
@@ -43,6 +45,11 @@ import java.util.Map;
  * also put the handlers on screen: once the numbers match, the code is the whole argument.
  */
 public final class PerfCompareTab implements DemoTab {
+
+    /** One request against a loopback server that fails on purpose. It is either instant
+     * or something is badly wrong, so the timeout only has to be generous enough to not
+     * misfire on a laptop that has just been woken up. */
+    private static final Duration BREAK_TIMEOUT = Duration.ofSeconds(10);
 
     private static final List<Integer> REQUEST_OPTIONS = List.of(1_000, 5_000, 20_000);
     private static final List<Integer> CONCURRENCY_OPTIONS = List.of(100, 500, 2_000);
@@ -71,6 +78,7 @@ public final class PerfCompareTab implements DemoTab {
     private final Button stopButton = new Button("Stop");
     private final Button resetButton = new Button("Reset stats");
     private final ToggleButton handlersButton = new ToggleButton("Show the handlers");
+    private final ToggleButton breakButton = new ToggleButton("Break it");
 
     private final Map<Era, StatsPanel> panels = new EnumMap<>(Era.class);
     private final Map<Era, XYChart.Series<Number, Number>> series = new EnumMap<>(Era.class);
@@ -84,6 +92,33 @@ public final class PerfCompareTab implements DemoTab {
     private final Label handlerCodeHeader = new Label();
     private final VBox handlerBox;
     private final VBox chartBox;
+
+    /**
+     * The three things that can occupy the space below the panels. They are siblings that
+     * take it in turns, so this has to be real state rather than two toggles guessing at
+     * each other.
+     */
+    private enum View { CHART, HANDLERS, BREAK }
+
+    private final TraceView blockingTrace = new TraceView(Era.PRESENT, "blocking");
+    private final TraceView asyncTrace = new TraceView(Era.WORKAROUND, "async");
+    private final Label breakLine = new Label();
+    private final VBox breakBox;
+
+    /**
+     * Panels and comparison lines together, so the break view can reclaim their height in
+     * one move. In presentation mode they push the traces off the bottom of the screen
+     * entirely, and the traces are a different argument from the throughput numbers — the
+     * numbers are still there the moment you go back to the chart.
+     */
+    private final VBox statsSection;
+
+    /** Guards against {@code setSelected} re-entering the toggles' own listeners. */
+    private boolean suppressViewSync;
+
+    /** Bumped by every fetch and by Stop, so a late reply from an abandoned one is dropped. */
+    private int breakGeneration;
+    private boolean breaking;
 
     private final LineChart<Number, Number> chart;
     private final VBox node;
@@ -117,16 +152,27 @@ public final class PerfCompareTab implements DemoTab {
         mismatchWarning.getStyleClass().add("warning-text");
         hide(mismatchWarning);
 
+        // The three views carry a style class each. Nothing in the stylesheet needs them
+        // today; they exist so "which view is on screen" is answerable from outside this
+        // class, which is otherwise only inferable from three visibility flags.
         chartBox = new VBox(6, chartLegend(), chart);
+        chartBox.getStyleClass().add("chart-view");
         VBox.setVgrow(chart, Priority.ALWAYS);
         VBox.setVgrow(chartBox, Priority.ALWAYS);
         chart.setMinHeight(200);
 
         handlerBox = buildHandlerView();
+        handlerBox.getStyleClass().add("handler-view");
         hide(handlerBox);
 
+        breakBox = buildBreakView();
+        breakBox.getStyleClass().add("break-view");
+        hide(breakBox);
+
+        statsSection = new VBox(10, panelRow, comparison, workaroundLine);
+
         VBox content = new VBox(10, buildControls(), buildCaptions(), mismatchWarning,
-                panelRow, comparison, workaroundLine, chartBox, handlerBox);
+                statsSection, chartBox, handlerBox, breakBox);
         content.setPadding(new Insets(12));
 
         ScrollPane scroller = new ScrollPane(content);
@@ -167,6 +213,30 @@ public final class PerfCompareTab implements DemoTab {
         show(panels.get(Era.WORKAROUND).getNode(), visible);
     }
 
+    /**
+     * Exactly one of the chart, the handlers and the traces is on screen at a time.
+     *
+     * <p>Both toggles are driven from here rather than from each other. Setting one's
+     * {@code selected} fires its own listener, so the sync is wrapped in a flag — the same
+     * re-entry defence {@link SegmentedPicker} documents.
+     */
+    private void showView(View view) {
+        show(chartBox, view == View.CHART);
+        show(handlerBox, view == View.HANDLERS);
+        show(breakBox, view == View.BREAK);
+
+        // Only the break view reclaims the panels' height; the handlers view keeps them,
+        // because the line-count argument is about the same run the numbers came from.
+        show(statsSection, view != View.BREAK);
+
+        suppressViewSync = true;
+        handlersButton.setSelected(view == View.HANDLERS);
+        breakButton.setSelected(view == View.BREAK);
+        handlersButton.setText(view == View.HANDLERS ? "Show the chart" : "Show the handlers");
+        breakButton.setText(view == View.BREAK ? "Show the chart" : "Break it");
+        suppressViewSync = false;
+    }
+
     // ------------------------------------------------------------------ controls
 
     private VBox buildControls() {
@@ -187,9 +257,24 @@ public final class PerfCompareTab implements DemoTab {
                 "Swap the chart for the handler that era actually runs.\n"
                         + "Past and present share one; the workaround needs its own."));
         handlersButton.selectedProperty().addListener((o, was, is) -> {
-            show(handlerBox, is);
-            show(chartBox, !is);
-            handlersButton.setText(is ? "Show the chart" : "Show the handlers");
+            if (!suppressViewSync) {
+                showView(is ? View.HANDLERS : View.CHART);
+            }
+        });
+
+        breakButton.getStyleClass().add("secondary-button");
+        breakButton.setTooltip(new Tooltip(
+                "Send one request to an endpoint that always fails, through both handler "
+                        + "shapes,\nand put the two stack traces side by side. "
+                        + "No load test."));
+        breakButton.selectedProperty().addListener((o, was, is) -> {
+            if (suppressViewSync) {
+                return;
+            }
+            showView(is ? View.BREAK : View.CHART);
+            if (is) {
+                fetchTraces();
+            }
         });
 
         Runnable onConfigChange = this::refreshMismatchWarning;
@@ -211,7 +296,7 @@ public final class PerfCompareTab implements DemoTab {
         status.getStyleClass().add("elapsed-timer");
 
         for (Region control : new Region[]{endpointBox, runButton, stopButton, resetButton,
-                handlersButton}) {
+                handlersButton, breakButton}) {
             // Never shrink a control below the width of its own text. Combined with the
             // FlowPane below, a too-narrow window wraps the row instead of turning every
             // label into "...".
@@ -226,7 +311,8 @@ public final class PerfCompareTab implements DemoTab {
                 field("", runButton),
                 field("", stopButton),
                 field("", resetButton),
-                field("", handlersButton));
+                field("", handlersButton),
+                field("", breakButton));
         row.setAlignment(Pos.BOTTOM_LEFT);
         return new VBox(row);
     }
@@ -332,6 +418,106 @@ public final class PerfCompareTab implements DemoTab {
         VBox box = new VBox(6, handlerCodeHeader, codeNode);
         VBox.setVgrow(box, Priority.ALWAYS);
         return box;
+    }
+
+    private VBox buildBreakView() {
+        breakLine.getStyleClass().add("break-line");
+        breakLine.setMaxWidth(Double.MAX_VALUE);
+        breakLine.setAlignment(Pos.CENTER);
+        breakLine.setWrapText(true);
+        hide(breakLine);
+
+        HBox traceRow = new HBox(12, blockingTrace.getNode(), asyncTrace.getNode());
+        traceRow.setAlignment(Pos.TOP_CENTER);
+        VBox.setVgrow(traceRow, Priority.ALWAYS);
+
+        VBox box = new VBox(10, traceRow, breakLine);
+        VBox.setVgrow(box, Priority.ALWAYS);
+        return box;
+    }
+
+    /**
+     * The blocking side of the break view follows the era picker between past and present,
+     * and stands on present when the workaround itself is selected — past and present run
+     * the same boom handler, so there is no third trace to show.
+     */
+    private Era blockingEra() {
+        return eraPicker.getValue() == Era.PAST ? Era.PAST : Era.PRESENT;
+    }
+
+    /**
+     * One request per handler shape, no load test, and no server restart that can be
+     * avoided: whichever era the server is already bound to goes first, so a warm server
+     * costs nothing and the worst case is a single rebind.
+     *
+     * <p>This deliberately does not require a prior load run. A stack trace does not depend
+     * on one, and gating it would make the button silently do nothing on a fresh tab.
+     */
+    private void fetchTraces() {
+        if (generator.isRunning() || breaking) {
+            return;
+        }
+        Era blocking = blockingEra();
+        blockingTrace.setEra(blocking);
+        blockingTrace.clear();
+        asyncTrace.clear();
+        hide(breakLine);
+
+        breaking = true;
+        int generation = ++breakGeneration;
+        setRunning(false);
+        status.setText("breaking it…");
+
+        Era runningNow = server.runningEra();
+        List<Era> order = runningNow == Era.WORKAROUND
+                ? List.of(Era.WORKAROUND, blocking)
+                : List.of(blocking, Era.WORKAROUND);
+
+        Thread fetcher = new Thread(() -> {
+            Map<Era, String> traces = new EnumMap<>(Era.class);
+            Map<Era, String> failures = new EnumMap<>(Era.class);
+            for (Era era : order) {
+                try {
+                    server.startFor(era);
+                    traces.put(era, BreakProbe.fetchTrace(server.port(), BREAK_TIMEOUT));
+                } catch (Throwable t) {
+                    failures.put(era, "Could not reach the server: " + t);
+                }
+            }
+            Platform.runLater(() -> {
+                if (generation != breakGeneration) {
+                    return;   // stopped, or a newer fetch already started
+                }
+                breaking = false;
+                status.setText("");
+                setRunning(false);
+                applyTrace(blockingTrace, blocking, traces, failures);
+                applyTrace(asyncTrace, Era.WORKAROUND, traces, failures);
+                refreshBreakLine(traces.get(blocking), traces.get(Era.WORKAROUND));
+            });
+        }, "break-it");
+        fetcher.setDaemon(true);
+        fetcher.start();
+    }
+
+    /** Failures land in the panel itself — {@code mismatchWarning} is shared and volatile. */
+    private static void applyTrace(TraceView view, Era era, Map<Era, String> traces,
+                                   Map<Era, String> failures) {
+        String trace = traces.get(era);
+        if (trace != null && !trace.isBlank()) {
+            view.setTrace(trace);
+        } else {
+            view.setError(failures.getOrDefault(era, "No trace came back."));
+        }
+    }
+
+    private void refreshBreakLine(String blocking, String async) {
+        boolean both = blocking != null && !blocking.isBlank()
+                && async != null && !async.isBlank();
+        show(breakLine, both);
+        if (both) {
+            breakLine.setText("Same failure. One trace tells you where.");
+        }
     }
 
     private void refreshHandlerCode() {
@@ -502,24 +688,36 @@ public final class PerfCompareTab implements DemoTab {
     }
 
     private void setRunning(boolean running) {
-        runButton.setDisable(running);
-        stopButton.setDisable(!running);
-        resetButton.setDisable(running);
-        eraPicker.setDisable(running);
-        endpointBox.setDisable(running);
-        requestsPicker.setDisable(running);
-        concurrencyPicker.setDisable(running);
+        // A break fetch is short, but it rebinds the server, so it locks the same controls
+        // a load run does. Stop stays live throughout so either can be abandoned.
+        boolean busy = running || breaking;
+        runButton.setDisable(busy);
+        stopButton.setDisable(!busy);
+        resetButton.setDisable(busy);
+        eraPicker.setDisable(busy);
+        endpointBox.setDisable(busy);
+        requestsPicker.setDisable(busy);
+        concurrencyPicker.setDisable(busy);
+        breakButton.setDisable(running);
     }
 
     @Override
     public void stopDemo() {
         generator.stop();
+        // Bumping the generation orphans an in-flight break fetch: it will still finish its
+        // requests, but its reply is dropped rather than landing on a tab that moved on.
+        breakGeneration++;
+        if (breaking) {
+            breaking = false;
+            status.setText("");
+            setRunning(false);
+        }
     }
 
-    /** ⌘K here means "reset stats" — both panels, the chart and the comparison line. */
+    /** ⌘K here means "reset stats" — the panels, the chart, the lines and the traces. */
     @Override
     public void clearOutput() {
-        if (generator.isRunning()) {
+        if (generator.isRunning() || breaking) {
             return;
         }
         for (Era era : Era.values()) {
@@ -530,6 +728,10 @@ public final class PerfCompareTab implements DemoTab {
         hide(comparison);
         hide(workaroundLine);
         hideWarning();
+        blockingTrace.clear();
+        asyncTrace.clear();
+        hide(breakLine);
+        showView(View.CHART);
         status.setText("");
     }
 
