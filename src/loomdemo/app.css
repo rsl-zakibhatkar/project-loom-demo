@@ -1,0 +1,672 @@
+/*
+ * Loom Stage Demo — projector stylesheet.
+ *
+ * Sizing rule: .root sets a px font size, everything else sizes in `em`. The
+ * presentation-mode toggle adds `.presentation` to the root, which bumps that one
+ * number and drags every other size up with it. Never hard-code px font sizes below.
+ *
+ * Colour rule: #FFAB40 (past) and #0097A7 (future) are the identity colours. They are
+ * used at full strength for fills, borders and chart series. Large *text* on a light
+ * background uses a darkened variant of the same hue (-past-ink / -future-ink) because
+ * #FFAB40 on white is unreadable from row 20. Dark theme flips these back to bright.
+ */
+
+/* ------------------------------------------------------------------ light theme */
+
+.root {
+    -fx-font-size: 15px;
+    -fx-font-family: "Helvetica Neue", "SF Pro Text", system, sans-serif;
+
+    -past-accent: #FFAB40;
+    -past-ink: #B45309;
+    -past-wash: #FFF4E5;
+    -past-on-accent: #26170A;
+
+    -future-accent: #0097A7;
+    -future-ink: #00707C;
+    -future-wash: #E2F5F7;
+    -future-on-accent: #FFFFFF;
+
+    -surface: #FFFFFF;
+    -surface-sunken: #F4F5F7;
+    -ink: #16191D;
+    -ink-muted: #5B6470;
+    -hairline: #D3D8DF;
+    -danger: #C62828;
+
+    -fx-base: #F0F1F3;
+    -fx-background: #FFFFFF;
+    -fx-control-inner-background: #FFFFFF;
+    -fx-focus-color: #0097A7;
+    -fx-faint-focus-color: #0097A722;
+}
+
+/* ------------------------------------------------------------------- dark theme */
+
+.root.dark {
+    -past-accent: #FFAB40;
+    -past-ink: #FFC773;
+    -past-wash: #2E2113;
+    -past-on-accent: #26170A;
+
+    -future-accent: #0097A7;
+    -future-ink: #4DD0E1;
+    -future-wash: #13282C;
+    -future-on-accent: #FFFFFF;
+
+    -surface: #23262B;
+    -surface-sunken: #1A1D21;
+    -ink: #ECEFF3;
+    -ink-muted: #A2ACB9;
+    -hairline: #3A4049;
+    -danger: #FF6B6B;
+
+    -fx-base: #2A2E34;
+    -fx-background: #1A1D21;
+    -fx-control-inner-background: #23262B;
+    -fx-focus-color: #4DD0E1;
+    -fx-faint-focus-color: #4DD0E133;
+}
+
+/* --------------------------------------------------------- presentation scaling */
+
+.root.presentation {
+    -fx-font-size: 19.5px;
+}
+
+/* --------------------------------------------------------------------- chrome */
+
+.app-root {
+    -fx-background-color: -surface-sunken;
+}
+
+.top-bar {
+    -fx-background-color: -surface;
+    -fx-border-color: transparent transparent -hairline transparent;
+    -fx-border-width: 0 0 1 0;
+    -fx-padding: 0.6em 1em 0.6em 1em;
+    -fx-spacing: 1em;
+    -fx-alignment: center-left;
+}
+
+.app-title {
+    -fx-font-size: 1.25em;
+    -fx-font-weight: bold;
+    -fx-text-fill: -ink;
+}
+
+.app-subtitle {
+    -fx-font-size: 0.95em;
+    -fx-text-fill: -ink-muted;
+}
+
+.caption {
+    -fx-font-size: 0.92em;
+    -fx-text-fill: -ink-muted;
+    -fx-wrap-text: true;
+}
+
+.warning-text {
+    -fx-font-size: 0.95em;
+    -fx-text-fill: -danger;
+    -fx-font-weight: bold;
+    -fx-wrap-text: true;
+}
+
+.section-label {
+    -fx-font-size: 0.95em;
+    -fx-font-weight: bold;
+    -fx-text-fill: -ink-muted;
+}
+
+/* ----------------------------------------------------------------------- tabs */
+
+.tab-pane > .tab-header-area > .tab-header-background {
+    -fx-background-color: -surface;
+}
+
+.tab-pane > .tab-header-area {
+    -fx-padding: 0.3em 0 0 0.6em;
+}
+
+.tab-pane > .tab-header-area > .headers-region > .tab {
+    -fx-padding: 0.55em 1.4em 0.55em 1.4em;
+    -fx-background-color: transparent;
+    -fx-background-radius: 0.4em 0.4em 0 0;
+}
+
+.tab-pane > .tab-header-area > .headers-region > .tab:selected {
+    -fx-background-color: -surface-sunken;
+}
+
+.tab-pane > .tab-header-area > .headers-region > .tab .tab-label {
+    -fx-font-size: 1.1em;
+    -fx-font-weight: bold;
+    -fx-text-fill: -ink-muted;
+}
+
+.tab-pane > .tab-header-area > .headers-region > .tab:selected .tab-label {
+    -fx-text-fill: -ink;
+}
+
+.tab-pane > .tab-header-area > .headers-region > .tab:selected:focused {
+    -fx-focus-color: transparent;
+}
+
+.tab-pane:focused > .tab-header-area > .headers-region > .tab:selected .focus-indicator {
+    -fx-border-color: transparent;
+}
+
+.tab-content-area {
+    -fx-background-color: -surface-sunken;
+}
+
+/* -------------------------------------------------------------------- buttons */
+
+.button, .toggle-button, .choice-box, .combo-box, .spinner {
+    -fx-font-size: 1em;
+    -fx-background-radius: 0.4em;
+    -fx-border-radius: 0.4em;
+}
+
+.run-button {
+    -fx-font-size: 1.3em;
+    -fx-font-weight: bold;
+    -fx-padding: 0.5em 1.8em 0.5em 1.8em;
+    -fx-background-color: -future-accent;
+    -fx-text-fill: -future-on-accent;
+    -fx-cursor: hand;
+}
+
+.run-button.past {
+    -fx-background-color: -past-accent;
+    -fx-text-fill: -past-on-accent;
+}
+
+.run-button:hover {
+    -fx-opacity: 0.9;
+}
+
+.run-button:disabled {
+    -fx-opacity: 0.4;
+}
+
+.secondary-button {
+    -fx-font-size: 1.05em;
+    -fx-padding: 0.45em 1.1em 0.45em 1.1em;
+    -fx-background-color: -surface;
+    -fx-text-fill: -ink;
+    -fx-border-color: -hairline;
+    -fx-border-width: 1;
+    -fx-cursor: hand;
+}
+
+.secondary-button:hover {
+    -fx-border-color: -ink-muted;
+}
+
+.secondary-button:disabled {
+    -fx-opacity: 0.4;
+}
+
+.icon-button {
+    -fx-font-size: 1em;
+    -fx-padding: 0.25em 0.6em 0.25em 0.6em;
+    -fx-background-color: -surface;
+    -fx-text-fill: -ink;
+    -fx-border-color: -hairline;
+    -fx-border-width: 1;
+    -fx-cursor: hand;
+    -fx-min-width: 2.2em;
+}
+
+/* ------------------------------------------------------- past / future toggle */
+
+.mode-toggle {
+    -fx-spacing: 0;
+    -fx-background-color: -surface;
+    -fx-border-color: -hairline;
+    -fx-border-width: 1;
+    -fx-background-radius: 0.5em;
+    -fx-border-radius: 0.5em;
+    -fx-padding: 0.22em;
+}
+
+.mode-button {
+    -fx-font-size: 1.05em;
+    -fx-font-weight: bold;
+    -fx-padding: 0.45em 1.2em 0.45em 1.2em;
+    -fx-background-color: transparent;
+    -fx-text-fill: -ink-muted;
+    -fx-background-radius: 0.35em;
+    -fx-cursor: hand;
+}
+
+.mode-button:selected.past {
+    -fx-background-color: -past-accent;
+    -fx-text-fill: -past-on-accent;
+}
+
+.mode-button:selected.future {
+    -fx-background-color: -future-accent;
+    -fx-text-fill: -future-on-accent;
+}
+
+.mode-button:disabled {
+    -fx-opacity: 0.45;
+}
+
+/* ------------------------------------------------------------------- console */
+
+.console-pane {
+    -fx-background-color: -surface;
+    -fx-border-color: -hairline;
+    -fx-border-width: 1;
+    -fx-background-radius: 0.5em;
+    -fx-border-radius: 0.5em;
+}
+
+.console-toolbar {
+    -fx-padding: 0.5em 0.7em 0.5em 0.7em;
+    -fx-spacing: 0.6em;
+    -fx-alignment: center-left;
+    -fx-border-color: transparent transparent -hairline transparent;
+    -fx-border-width: 0 0 1 0;
+}
+
+.console-text {
+    -fx-font-family: "SF Mono", "Menlo", "Monaco", monospace;
+    -fx-text-fill: -ink;
+    -fx-background-color: transparent;
+    -fx-highlight-fill: -future-accent;
+}
+
+.console-text .content {
+    -fx-background-color: -surface;
+}
+
+.console-text:focused {
+    -fx-faint-focus-color: transparent;
+    -fx-focus-color: transparent;
+}
+
+.elapsed-timer {
+    -fx-font-family: "SF Mono", "Menlo", "Monaco", monospace;
+    -fx-font-size: 1.15em;
+    -fx-font-weight: bold;
+    -fx-text-fill: -ink-muted;
+}
+
+/* The payoff line. Deliberately enormous. */
+.punchline {
+    -fx-font-size: 2.4em;
+    -fx-font-weight: bold;
+    -fx-padding: 0.5em 0.7em 0.5em 0.7em;
+    -fx-wrap-text: true;
+    -fx-background-radius: 0 0 0.5em 0.5em;
+}
+
+.punchline.past {
+    -fx-text-fill: -past-ink;
+    -fx-background-color: -past-wash;
+}
+
+.punchline.future {
+    -fx-text-fill: -future-ink;
+    -fx-background-color: -future-wash;
+}
+
+/* ---------------------------------------------------------------- scoreboard */
+
+.scoreboard {
+    -fx-background-color: -surface;
+    -fx-border-color: -hairline;
+    -fx-border-width: 1;
+    -fx-background-radius: 0.5em;
+    -fx-border-radius: 0.5em;
+    -fx-padding: 0.5em 1em 0.5em 1em;
+    -fx-spacing: 1.2em;
+    -fx-alignment: center-left;
+}
+
+.score-chip {
+    -fx-spacing: 0.5em;
+    -fx-alignment: center-left;
+}
+
+.score-tag {
+    -fx-font-size: 0.9em;
+    -fx-font-weight: bold;
+    -fx-padding: 0.2em 0.6em 0.2em 0.6em;
+    -fx-background-radius: 0.3em;
+}
+
+.score-tag.past {
+    -fx-background-color: -past-accent;
+    -fx-text-fill: -past-on-accent;
+}
+
+.score-tag.future {
+    -fx-background-color: -future-accent;
+    -fx-text-fill: -future-on-accent;
+}
+
+.score-value {
+    -fx-font-family: "SF Mono", "Menlo", "Monaco", monospace;
+    -fx-font-size: 1.15em;
+    -fx-font-weight: bold;
+}
+
+.score-value.past {
+    -fx-text-fill: -past-ink;
+}
+
+.score-value.future {
+    -fx-text-fill: -future-ink;
+}
+
+.score-value.empty {
+    -fx-text-fill: -ink-muted;
+    -fx-font-weight: normal;
+}
+
+.score-divider {
+    -fx-text-fill: -hairline;
+    -fx-font-size: 1.2em;
+}
+
+/* --------------------------------------------------------------- code editor */
+
+.editor-frame {
+    -fx-background-color: -surface;
+    -fx-border-color: -hairline;
+    -fx-border-width: 1;
+    -fx-background-radius: 0.5em;
+    -fx-border-radius: 0.5em;
+}
+
+.editor-toolbar {
+    -fx-padding: 0.5em 0.7em 0.5em 0.7em;
+    -fx-spacing: 0.6em;
+    -fx-alignment: center-left;
+    -fx-border-color: transparent transparent -hairline transparent;
+    -fx-border-width: 0 0 1 0;
+}
+
+.code-area {
+    -fx-background-color: -surface;
+}
+
+.code-area .text {
+    -fx-font-family: "SF Mono", "Menlo", "Monaco", monospace;
+    -fx-fill: -ink;
+}
+
+.code-area .caret {
+    -fx-stroke: -ink;
+    -fx-stroke-width: 2;
+}
+
+.code-area .selection {
+    -fx-fill: #0097A755;
+}
+
+.code-area .lineno {
+    -fx-background-color: -surface-sunken;
+    -fx-text-fill: -ink-muted;
+    -fx-font-family: "SF Mono", "Menlo", "Monaco", monospace;
+    -fx-padding: 0 0.6em 0 0.6em;
+}
+
+/* Java syntax highlighting */
+.code-area .keyword   { -fx-fill: #7B1FA2; -fx-font-weight: bold; }
+.code-area .string    { -fx-fill: #00796B; }
+.code-area .comment   { -fx-fill: #78909C; -fx-font-style: italic; }
+.code-area .number    { -fx-fill: #C2185B; }
+.code-area .annotation{ -fx-fill: #EF6C00; }
+.code-area .type      { -fx-fill: #0277BD; -fx-font-weight: bold; }
+.code-area .default-text { -fx-fill: -ink; }
+
+.root.dark .code-area .keyword   { -fx-fill: #CE93D8; }
+.root.dark .code-area .string    { -fx-fill: #80CBC4; }
+.root.dark .code-area .comment   { -fx-fill: #8FA1AD; }
+.root.dark .code-area .number    { -fx-fill: #F48FB1; }
+.root.dark .code-area .annotation{ -fx-fill: #FFB74D; }
+.root.dark .code-area .type      { -fx-fill: #81D4FA; }
+
+.dirty-badge {
+    -fx-font-size: 0.9em;
+    -fx-font-weight: bold;
+    -fx-text-fill: -past-ink;
+}
+
+/* ------------------------------------------------------------- inline confirm */
+
+.inline-confirm {
+    -fx-background-color: -past-wash;
+    -fx-border-color: -past-accent;
+    -fx-border-width: 1;
+    -fx-background-radius: 0.4em;
+    -fx-border-radius: 0.4em;
+    -fx-padding: 0.5em 0.8em 0.5em 0.8em;
+    -fx-spacing: 0.8em;
+    -fx-alignment: center-left;
+}
+
+.inline-confirm .message {
+    -fx-font-size: 1em;
+    -fx-font-weight: bold;
+    -fx-text-fill: -ink;
+}
+
+/* -------------------------------------------------------------- stats panels */
+
+.stats-panel {
+    -fx-background-color: -surface;
+    -fx-border-width: 2;
+    -fx-background-radius: 0.5em;
+    -fx-border-radius: 0.5em;
+    -fx-padding: 0;
+}
+
+.stats-panel.past {
+    -fx-border-color: -past-accent;
+}
+
+.stats-panel.future {
+    -fx-border-color: -future-accent;
+}
+
+.panel-header {
+    -fx-font-size: 1.1em;
+    -fx-font-weight: bold;
+    -fx-padding: 0.5em 0.9em 0.5em 0.9em;
+    -fx-background-radius: 0.35em 0.35em 0 0;
+    -fx-max-width: infinity;
+}
+
+.panel-header.past {
+    -fx-background-color: -past-accent;
+    -fx-text-fill: -past-on-accent;
+}
+
+.panel-header.future {
+    -fx-background-color: -future-accent;
+    -fx-text-fill: -future-on-accent;
+}
+
+.panel-body {
+    -fx-padding: 0.9em;
+    -fx-spacing: 0.5em;
+}
+
+.hero-number {
+    -fx-font-size: 3.2em;
+    -fx-font-weight: bold;
+}
+
+.hero-number.past  { -fx-text-fill: -past-ink; }
+.hero-number.future{ -fx-text-fill: -future-ink; }
+.hero-number.empty { -fx-text-fill: -ink-muted; }
+
+.hero-unit {
+    -fx-font-size: 1em;
+    -fx-font-weight: bold;
+    -fx-text-fill: -ink-muted;
+}
+
+.stat-label {
+    -fx-font-size: 0.95em;
+    -fx-text-fill: -ink-muted;
+}
+
+.stat-value {
+    -fx-font-family: "SF Mono", "Menlo", "Monaco", monospace;
+    -fx-font-size: 1.25em;
+    -fx-font-weight: bold;
+    -fx-text-fill: -ink;
+}
+
+.stat-value.empty {
+    -fx-text-fill: -ink-muted;
+    -fx-font-weight: normal;
+}
+
+.stat-value.error-count {
+    -fx-text-fill: -danger;
+}
+
+.config-text {
+    -fx-font-size: 0.85em;
+    -fx-text-fill: -ink-muted;
+    -fx-wrap-text: true;
+}
+
+.panel-separator {
+    -fx-background-color: -hairline;
+    -fx-min-height: 1;
+    -fx-pref-height: 1;
+    -fx-max-height: 1;
+}
+
+/* The sentence the audience remembers. */
+.comparison-line {
+    -fx-font-size: 1.9em;
+    -fx-font-weight: bold;
+    -fx-text-fill: -ink;
+    -fx-wrap-text: true;
+    -fx-padding: 0.5em 0.8em 0.5em 0.8em;
+    -fx-background-color: -surface;
+    -fx-border-color: -hairline;
+    -fx-border-width: 1;
+    -fx-background-radius: 0.5em;
+    -fx-border-radius: 0.5em;
+    -fx-alignment: center;
+}
+
+.comparison-line .highlight {
+    -fx-fill: -future-ink;
+}
+
+/* --------------------------------------------------------------------- chart */
+
+.chart {
+    -fx-background-color: -surface;
+    -fx-border-color: -hairline;
+    -fx-border-width: 1;
+    -fx-background-radius: 0.5em;
+    -fx-border-radius: 0.5em;
+    -fx-padding: 0.5em;
+}
+
+.chart-plot-background {
+    -fx-background-color: -surface;
+}
+
+.chart-vertical-grid-lines, .chart-horizontal-grid-lines {
+    -fx-stroke: -hairline;
+}
+
+.chart-alternative-row-fill {
+    -fx-fill: transparent;
+    -fx-stroke: transparent;
+}
+
+.axis {
+    -fx-tick-label-fill: -ink-muted;
+    -fx-font-size: 0.85em;
+}
+
+.axis-label {
+    -fx-text-fill: -ink-muted;
+    -fx-font-size: 0.9em;
+}
+
+.chart-title {
+    -fx-text-fill: -ink;
+    -fx-font-size: 1em;
+    -fx-font-weight: bold;
+}
+
+.chart-legend {
+    -fx-background-color: transparent;
+    -fx-font-size: 0.95em;
+}
+
+.chart-legend-item {
+    -fx-text-fill: -ink;
+}
+
+/* Series colours are pinned to the mode colours, not JavaFX's default rotation. */
+.chart-series-line.series-past {
+    -fx-stroke: -past-accent;
+    -fx-stroke-width: 2.5;
+}
+
+.chart-series-line.series-future {
+    -fx-stroke: -future-accent;
+    -fx-stroke-width: 2.5;
+}
+
+.chart-line-symbol {
+    -fx-background-radius: 3px;
+    -fx-padding: 3px;
+}
+
+.chart-line-symbol.series-past {
+    -fx-background-color: -past-accent, -surface;
+}
+
+.chart-line-symbol.series-future {
+    -fx-background-color: -future-accent, -surface;
+}
+
+.chart-legend-item-symbol.series-past {
+    -fx-background-color: -past-accent;
+}
+
+.chart-legend-item-symbol.series-future {
+    -fx-background-color: -future-accent;
+}
+
+/* ------------------------------------------------------------------ tooltips */
+
+.tooltip {
+    -fx-font-size: 1em;
+    -fx-background-color: #2B2F36;
+    -fx-text-fill: #FFFFFF;
+    -fx-background-radius: 0.4em;
+    -fx-padding: 0.6em 0.8em 0.6em 0.8em;
+    -fx-wrap-text: true;
+    -fx-max-width: 30em;
+}
+
+/* ------------------------------------------------------------------- scrolls */
+
+.scroll-pane {
+    -fx-background-color: transparent;
+}
+
+.scroll-pane > .viewport {
+    -fx-background-color: transparent;
+}
