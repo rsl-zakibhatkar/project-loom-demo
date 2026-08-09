@@ -3,30 +3,38 @@ package loomdemo.server;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
-import loomdemo.Mode;
+import loomdemo.Era;
 
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * A tiny order service, embedded in the app, that exists to be slow in an honest way.
  *
- * <p>Every handler does exactly one thing: {@link Thread#sleep} for the endpoint's
- * latency, then return JSON. The sleep stands in for a blocking database call — that is
- * the whole point. What changes between modes is not the handler but the executor
- * underneath it:
+ * <p>Every endpoint does exactly one thing: wait out its latency, then return JSON. The
+ * wait stands in for a database call — that is the whole point. What changes between eras
+ * is how the server survives that wait:
  *
  * <ul>
- *   <li>{@link Mode#PAST} — {@code newFixedThreadPool(200)}: 200 requests in flight,
- *       everything else queues.</li>
- *   <li>{@link Mode#FUTURE} — {@code newVirtualThreadPerTaskExecutor()}: as many in
- *       flight as arrive.</li>
+ *   <li>{@link Era#PAST} — {@code newFixedThreadPool(200)}, blocking handler: 200 requests
+ *       in flight, everything else queues.</li>
+ *   <li>{@link Era#WORKAROUND} — one thread per core, async handler: the handler registers
+ *       a continuation and returns, so no thread is held during the wait. Thousands of
+ *       requests overlap on a handful of threads.</li>
+ *   <li>{@link Era#PRESENT} — {@code newVirtualThreadPerTaskExecutor()}, the same blocking
+ *       handler as PAST: as many in flight as arrive.</li>
  * </ul>
+ *
+ * <p><strong>Past and present share a handler byte for byte.</strong> Only the workaround
+ * needs different code, and that is the argument the comparison tab is making.
  *
  * <p>Bound to loopback on an ephemeral port, so it never collides with something already
  * running on the presenting machine and never leaves the laptop.
@@ -99,44 +107,50 @@ public final class OrderServer {
 
     private HttpServer server;
     private ExecutorService executor;
-    private Mode runningMode;
+    private Era runningEra;
     private int port;
 
     public synchronized boolean isRunning() {
         return server != null;
     }
 
-    public synchronized Mode runningMode() {
-        return runningMode;
+    public synchronized Era runningEra() {
+        return runningEra;
     }
 
     public synchronized int port() {
         return port;
     }
 
-    /** Start the server for {@code mode}, restarting it if it is already up in the other mode. */
-    public synchronized void startFor(Mode mode) throws IOException {
-        if (server != null && runningMode == mode) {
+    /** Start the server for {@code era}, restarting it if it is already up in another era. */
+    public synchronized void startFor(Era era) throws IOException {
+        if (server != null && runningEra == era) {
             return;
         }
         stop();
 
         HttpServer created = HttpServer.create(
                 new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), BACKLOG);
+
+        ExecutorService createdExecutor = switch (era) {
+            case PAST -> Executors.newFixedThreadPool(200);
+            case WORKAROUND -> Executors.newFixedThreadPool(Era.asyncThreads());
+            case PRESENT -> Executors.newVirtualThreadPerTaskExecutor();
+        };
+
         for (Endpoint endpoint : Endpoint.values()) {
-            created.createContext(endpoint.path(), handlerFor(endpoint.latencyMillis()));
+            HttpHandler handler = era == Era.WORKAROUND
+                    ? asyncHandlerFor(endpoint.latencyMillis(), createdExecutor)
+                    : handlerFor(endpoint.latencyMillis());
+            created.createContext(endpoint.path(), handler);
         }
 
-        ExecutorService created_executor = mode == Mode.PAST
-                ? Executors.newFixedThreadPool(200)
-                : Executors.newVirtualThreadPerTaskExecutor();
-
-        created.setExecutor(created_executor);
+        created.setExecutor(createdExecutor);
         created.start();
 
         this.server = created;
-        this.executor = created_executor;
-        this.runningMode = mode;
+        this.executor = createdExecutor;
+        this.runningEra = era;
         this.port = created.getAddress().getPort();
     }
 
@@ -153,8 +167,96 @@ public final class OrderServer {
             executor.shutdownNow();
             executor = null;
         }
-        runningMode = null;
+        runningEra = null;
         port = 0;
+    }
+
+    /*
+     * ------------------------------------------------------------------ handler sources
+     *
+     * What the "Show the handlers" view puts on screen. These are extracts of the two
+     * methods directly below them, kept adjacent so they cannot drift far — edit one, edit
+     * the other. They are what the audience reads while the numbers are still up, and they
+     * are the whole reason the workaround era is in this app: async ties with virtual
+     * threads on throughput, so the code is the only thing left to compare.
+     */
+
+    /** PAST and PRESENT both run this, unchanged. */
+    public static final String BLOCKING_HANDLER_SOURCE = """
+            exchange -> {
+                try {
+                    // The one line that matters: a blocking call for the database.
+                    Thread.sleep(latencyMillis);
+
+                    byte[] body = json(exchange, latencyMillis);
+                    exchange.getResponseHeaders().set("Content-Type", "application/json");
+                    exchange.sendResponseHeaders(200, body.length);
+                    try (OutputStream out = exchange.getResponseBody()) {
+                        out.write(body);
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    quietly(exchange, 503);
+                } catch (Throwable t) {
+                    quietly(exchange, 500);
+                } finally {
+                    exchange.close();
+                }
+            }
+            """;
+
+    /** WORKAROUND runs this. Same server, same endpoint, same simulated database. */
+    public static final String ASYNC_HANDLER_SOURCE = """
+            exchange -> CompletableFuture
+                    .supplyAsync(
+                            () -> json(exchange, latencyMillis),   // the database call
+                            CompletableFuture.delayedExecutor(
+                                    latencyMillis, MILLISECONDS, eventLoop))
+                    .thenAccept(body -> respond(exchange, 200, body))
+                    .exceptionally(failure -> {
+                        respond(exchange, 500, null);
+                        return null;
+                    })
+                    .whenComplete((ignored, failure) -> exchange.close());
+
+            // ...plus the response write, which the blocking version got for free
+            // from try-with-resources:
+
+            static void respond(HttpExchange exchange, int status, byte[] body) {
+                try {
+                    if (body == null) {
+                        exchange.sendResponseHeaders(status, -1);
+                        return;
+                    }
+                    exchange.getResponseHeaders().set("Content-Type", "application/json");
+                    exchange.sendResponseHeaders(status, body.length);
+                    try (OutputStream out = exchange.getResponseBody()) {
+                        out.write(body);
+                    }
+                } catch (IOException e) {
+                    // Nowhere to throw to. There is no caller left on this stack, and
+                    // the stack trace you would get names a pool worker, not the
+                    // request that failed.
+                }
+            }
+            """;
+
+    public static String handlerSourceFor(Era era) {
+        return era == Era.WORKAROUND ? ASYNC_HANDLER_SOURCE : BLOCKING_HANDLER_SOURCE;
+    }
+
+    /**
+     * Lines of actual code, ignoring blanks and comments.
+     *
+     * <p>Counting comments would let the async version look bad for the wrong reason —
+     * its comments are there to explain it, which is itself the point, but the figure on
+     * the panel should be code the audience cannot argue with.
+     */
+    public static int handlerLineCount(Era era) {
+        return (int) handlerSourceFor(era).lines()
+                .map(String::strip)
+                .filter(line -> !line.isEmpty() && !line.startsWith("//"))
+                .count();
     }
 
     private static HttpHandler handlerFor(int latencyMillis) {
@@ -178,6 +280,46 @@ public final class OrderServer {
                 exchange.close();
             }
         };
+    }
+
+    /**
+     * The workaround era: nothing blocks. The handler registers a continuation and returns
+     * immediately, so its thread is free before the simulated database call has even
+     * started. {@code delayedExecutor} is the honest stand-in for a non-blocking driver —
+     * "this completes in N ms without holding a thread".
+     *
+     * <p>The same small pool parses requests and writes responses, which is what a reactive
+     * event loop actually is, and what makes the headline true: a handful of threads doing
+     * what two hundred could not.
+     */
+    private static HttpHandler asyncHandlerFor(int latencyMillis, Executor eventLoop) {
+        return exchange -> CompletableFuture
+                .supplyAsync(() -> json(exchange, latencyMillis),
+                        CompletableFuture.delayedExecutor(
+                                latencyMillis, TimeUnit.MILLISECONDS, eventLoop))
+                .thenAccept(body -> respond(exchange, 200, body))
+                .exceptionally(failure -> {
+                    respond(exchange, 500, null);
+                    return null;
+                })
+                .whenComplete((ignored, failure) -> exchange.close());
+    }
+
+    /** The response write the blocking handler got for free from try-with-resources. */
+    private static void respond(HttpExchange exchange, int status, byte[] body) {
+        try {
+            if (body == null) {
+                exchange.sendResponseHeaders(status, -1);
+                return;
+            }
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(status, body.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(body);
+            }
+        } catch (IOException e) {
+            // Nowhere to throw to: there is no caller left on this stack.
+        }
     }
 
     private static byte[] json(HttpExchange exchange, int latencyMillis) {

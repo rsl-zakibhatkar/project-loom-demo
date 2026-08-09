@@ -1,17 +1,17 @@
 package loomdemo.load;
 
-import loomdemo.Mode;
+import loomdemo.Era;
 import loomdemo.server.OrderServer;
 
 import java.util.Arrays;
 import java.util.Locale;
 
 /**
- * The outcome of one load test. One of these per mode is held by the UI at a time —
- * running a mode replaces that side's result and leaves the other side untouched.
+ * The outcome of one load test. One of these per era is held by the UI at a time —
+ * running an era replaces that panel's result and leaves the others untouched.
  */
 public record RunResult(
-        Mode mode,
+        Era era,
         OrderServer.Endpoint endpoint,
         int requestedTotal,
         int concurrency,
@@ -45,12 +45,12 @@ public record RunResult(
      * Build a result from raw per-request latencies. Only the first {@code completed}
      * entries of {@code latenciesMillis} are meaningful.
      */
-    public static RunResult from(Mode mode, OrderServer.Endpoint endpoint, int requestedTotal,
+    public static RunResult from(Era era, OrderServer.Endpoint endpoint, int requestedTotal,
                                  int concurrency, long elapsedMillis, long[] latenciesMillis,
                                  int completed, int errors, String errorDetail) {
         long[] sorted = Arrays.copyOf(latenciesMillis, completed);
         Arrays.sort(sorted);
-        return new RunResult(mode, endpoint, requestedTotal, concurrency, elapsedMillis,
+        return new RunResult(era, endpoint, requestedTotal, concurrency, elapsedMillis,
                 completed, errors,
                 percentile(sorted, 0.50), percentile(sorted, 0.95), percentile(sorted, 0.99),
                 errorDetail);

@@ -7,14 +7,19 @@ threads. Three demos, switchable via tabs:
 2. **Thread Bomb** — what platform threads cost
 3. **Performance Comparison** — what that cost does to a server
 
-Demos 2 and 3 carry a past/present toggle:
+Demo 2 carries a past/present toggle; demo 3 carries all three eras:
 
 - **Take me to the past** — platform threads, bounded pools · orange `#FFAB40`
+- **Take me to the workaround** — async callbacks, one thread per core · violet `#7E57C2`
 - **Take me to the present** — virtual threads, since Java 21 · teal `#0097A7`
 
 Deliberately *present*, not *future*: virtual threads went final in Java 21 in September
 2023. Calling them the future on stage makes them sound like something to wait for rather
 than something the room could have shipped two years ago.
+
+The workaround era exists to answer the one objection that beats a two-sided demo: *"I'd
+use CompletableFuture and get the same numbers without Loom."* That is true, and the tab
+shows it is true — then puts the two handlers side by side.
 
 Built with JavaFX on Java 21, shipped as a `.dmg` with a bundled runtime. The presenting
 machine needs no JDK and no network.
@@ -159,10 +164,24 @@ yours during the warm-up run so you can quote it confidently.
      connection pool before the clock starts. Then the orange line climbs on the chart.
    - Left panel fills: roughly **1,850 req/s, p99 ~1,050 ms**.
 3. Switch to **Take me to the present**, press **Run** again.
-   - Right panel fills: roughly **12,000+ req/s, p99 ~160 ms**. The teal line hugs the
-     bottom of the chart.
+   - Right panel fills: roughly **11,700–12,800 req/s, p99 ~150–185 ms**. The teal line
+     hugs the bottom of the chart.
 4. The line underneath is the one they will remember:
-   **`Present: 6.9× throughput, p99 latency 1,084 ms → 160 ms`**
+   **`Present: 6.8× throughput, p99 latency 1,072 ms → 152 ms`**
+5. **Now take the objection before someone else does.** Ask the room how they would fix
+   the past number without Loom. Someone says CompletableFuture, or reactive, or WebFlux.
+   Switch to **Take me to the workaround** and press **Run**.
+   - A third panel slides in between the other two, in violet: roughly **10,600–14,900
+     req/s, p99 ~140–220 ms** on **one thread per core**. It matches virtual threads, and
+     a second line appears saying so.
+   - Say the quiet part: *they are right*. Async really does solve this.
+6. Press **Show the handlers**. The chart is replaced by the handler each era actually
+   runs, and the era buttons now flip the code instead of the run.
+   - Past and present share one handler, byte for byte: **18 lines**, one `Thread.sleep`,
+     one `try/finally`, and a stack trace that names your own method when it breaks.
+   - The workaround needs **25 lines**, a `CompletableFuture` chain, a second method to
+     write the response, and a `catch` block with nowhere to throw to.
+   - **`That is the whole talk.`** Same throughput. One of them is code you can debug.
 
 **Say this out loud**: the handler code is identical in both runs. The only thing that
 changed is the executor the server hands requests to. And the load generator uses virtual
@@ -185,6 +204,7 @@ comparison is invalid. Re-run one side to match.
 | A run seems stuck | `⌘.` (Stop). Tabs 1 and 2 kill the child JVM; tab 3 abandons the load test and **keeps the previous result on screen**, so you never lose a filled panel to a bad run. |
 | Console is cluttered | `⌘K`. On tab 1 this also resets the run counter back to #1. On tab 3 it resets both panels and the chart, so only use it if you mean it. |
 | Two Cooks produced the same order twice | Say so — it is genuinely random, not guaranteed to differ. Run it once more. Two identical runs followed by a different one makes the point better than a lecture would. |
+| The workaround beat virtual threads | Expected, and fine. They are the same number and the run-to-run spread is wider than the gap. Say "same speed" and move to the handlers — that is where the argument actually is. |
 | Thread bomb dies at a surprising number | Say the number out loud and move on. It is machine-specific and the contrast is unaffected. |
 | Errors appear on a stats panel | Hover the errors figure for the actual failure kinds. Most likely something else on the machine is holding ports or CPU. Press Stop, then Run again. |
 | The code got edited into something broken | **Reset** button above the editor restores the original source for that mode or snippet. If you run it broken first, the real `javac` error appears in the console — which is a fine thing to show on purpose. |
@@ -257,10 +277,51 @@ to shorten the labels.
 
 ### Tab 3 measures a real server
 
-`com.sun.net.httpserver` on loopback, ephemeral port. Every handler is one
-`Thread.sleep()` standing in for a database call. Changing mode restarts the server with a
-different executor — `newFixedThreadPool(200)` versus
-`newVirtualThreadPerTaskExecutor()`. Nothing else differs.
+`com.sun.net.httpserver` on loopback, ephemeral port. Every endpoint waits out its latency
+and returns JSON; the wait stands in for a database call. Changing era restarts the server
+with a different executor:
+
+| Era | Executor | Handler |
+| --- | --- | --- |
+| past | `newFixedThreadPool(200)` | blocking |
+| workaround | `newFixedThreadPool(availableProcessors())` | async |
+| present | `newVirtualThreadPerTaskExecutor()` | blocking — **identical to past** |
+
+Past and present share a handler byte for byte. Only the workaround needs different code,
+and that is the argument the tab is making.
+
+### The workaround era genuinely does not block
+
+The async handler registers a continuation and returns, so its thread is free before the
+simulated database call has even started. `CompletableFuture.delayedExecutor` is the stand-in
+for a non-blocking driver — "this completes in N ms without holding a thread". One small
+pool does request parsing *and* response writes, which is what a reactive event loop is.
+
+This works because `com.sun.net.httpserver` does not close an exchange when the handler
+returns: `ServerImpl.Exchange.run()` ends right after the handler chain, the request and
+response reapers are disabled by default (`maxReqTime` / `maxRspTime` are `-1`), and an
+in-flight connection is removed from both idle-sweeper sets. Another thread can complete
+the exchange later. **Do not set `sun.net.httpserver.maxReqTime` or `maxRspTime`** — either
+one would start killing async requests mid-flight.
+
+Measured on an 8-core M2 at 5,000 requests / 2,000 concurrent: **peak 2,000 exchanges open
+at once on 8 threads**, zero errors.
+
+**The workaround ties with virtual threads, and that is the honest result.** Across four
+runs: past 1,700–1,900 req/s, workaround 10,600–14,900, present 11,700–12,800. The
+workaround won three of four — inside the run-to-run spread, which is wider on the async
+side than the virtual-thread side. Async is not more throughput; it is the same throughput,
+noisier, for 25 lines of handler against 18.
+
+That tie is the entire reason the era is in the app. A comparison that only showed past
+against present would lose to the first person who says "I'd use CompletableFuture" —
+because they would be right. Showing that they are right, and then showing the two
+handlers, is a much stronger position than never raising it.
+
+**The handler sources on screen are extracts**, held as constants next to the methods they
+mirror in `OrderServer.java`. Edit one, edit the other. The line counts under the panels
+ignore blanks and comments, so the async version is not being penalised for explaining
+itself.
 
 Each run has an untimed warm-up that opens one pooled connection per unit of concurrency,
 then the timed run. The warm-up is not cosmetic: without it, the measured phase opens

@@ -7,20 +7,20 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
-import loomdemo.Mode;
+import loomdemo.Era;
 import loomdemo.load.RunResult;
 
 import java.util.Locale;
 
 /**
- * One mode's most recent load-test result. Starts empty with dashes; a run replaces this
- * side only, so past and future can be filled minutes apart and still sit side by side.
+ * One era's most recent load-test result. Starts empty with dashes; a run replaces this
+ * panel only, so the eras can be filled minutes apart and still sit side by side.
  */
 public final class StatsPanel {
 
     private static final String EMPTY = "—";
 
-    private final Mode mode;
+    private final Era era;
     private final Label throughput = new Label(EMPTY);
     private final Label p50 = new Label(EMPTY);
     private final Label p95 = new Label(EMPTY);
@@ -32,16 +32,14 @@ public final class StatsPanel {
 
     private RunResult result;
 
-    public StatsPanel(Mode mode) {
-        this.mode = mode;
+    public StatsPanel(Era era) {
+        this.era = era;
 
-        Label header = new Label(mode == Mode.PAST
-                ? "PAST  ·  platform threads, pool of 200"
-                : "PRESENT  ·  virtual threads");
-        header.getStyleClass().addAll("panel-header", mode.styleClass());
+        Label header = new Label(era.panelHeader());
+        header.getStyleClass().addAll("panel-header", era.styleClass());
         header.setMaxWidth(Double.MAX_VALUE);
 
-        throughput.getStyleClass().addAll("hero-number", mode.styleClass(), "empty");
+        throughput.getStyleClass().addAll("hero-number", era.styleClass(), "empty");
         Label heroUnit = new Label("requests / sec");
         heroUnit.getStyleClass().add("hero-unit");
 
@@ -66,7 +64,7 @@ public final class StatsPanel {
         VBox.setVgrow(body, Priority.ALWAYS);
 
         node = new VBox(header, body);
-        node.getStyleClass().addAll("stats-panel", mode.styleClass());
+        node.getStyleClass().addAll("stats-panel", era.styleClass());
         HBox.setHgrow(node, Priority.ALWAYS);
     }
 
@@ -131,8 +129,8 @@ public final class StatsPanel {
         return result != null;
     }
 
-    public Mode mode() {
-        return mode;
+    public Era era() {
+        return era;
     }
 
     public VBox getNode() {

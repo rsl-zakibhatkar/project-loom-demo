@@ -10,6 +10,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.control.ToggleButton;
 import javafx.scene.control.Tooltip;
 import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.HBox;
@@ -17,17 +18,29 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import loomdemo.DemoTab;
-import loomdemo.Mode;
+import loomdemo.Era;
 import loomdemo.load.LoadGenerator;
 import loomdemo.load.RunResult;
 import loomdemo.server.OrderServer;
 
+import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
- * Tab 2: run the same load test against the same server in both modes and put the two
- * results next to each other.
+ * Tab 3: run the same load test against the same server in each era and put the results
+ * next to each other.
+ *
+ * <p>Past and present are the main comparison and are always on screen. The workaround
+ * panel stays hidden until it has actually been run, so the tab opens as the two-panel
+ * contrast the talk is built around and the third slides in only when the presenter
+ * reaches for it.
+ *
+ * <p>The workaround will tie with virtual threads on throughput — that is what reactive
+ * does, and pretending otherwise would be dishonest. Which is exactly why this tab can
+ * also put the handlers on screen: once the numbers match, the code is the whole argument.
  */
 public final class PerfCompareTab implements DemoTab {
 
@@ -37,7 +50,8 @@ public final class PerfCompareTab implements DemoTab {
     private final OrderServer server = new OrderServer();
     private final LoadGenerator generator = new LoadGenerator();
 
-    private final ModeToggle modeToggle = new ModeToggle();
+    private final SegmentedPicker<Era> eraPicker = new SegmentedPicker<>(
+            List.of(Era.values()), Era::label, Era.PAST, Era::styleClass);
     private final ComboBox<OrderServer.Endpoint> endpointBox = new ComboBox<>();
 
     /*
@@ -56,42 +70,63 @@ public final class PerfCompareTab implements DemoTab {
     private final Button runButton = new Button("▶  Run");
     private final Button stopButton = new Button("Stop");
     private final Button resetButton = new Button("Reset stats");
+    private final ToggleButton handlersButton = new ToggleButton("Show the handlers");
 
-    private final StatsPanel pastPanel = new StatsPanel(Mode.PAST);
-    private final StatsPanel futurePanel = new StatsPanel(Mode.FUTURE);
+    private final Map<Era, StatsPanel> panels = new EnumMap<>(Era.class);
+    private final Map<Era, XYChart.Series<Number, Number>> series = new EnumMap<>(Era.class);
+
     private final Label comparison = new Label();
+    private final Label workaroundLine = new Label();
     private final Label status = new Label();
     private final Label mismatchWarning = new Label();
 
-    private final XYChart.Series<Number, Number> pastSeries = new XYChart.Series<>();
-    private final XYChart.Series<Number, Number> futureSeries = new XYChart.Series<>();
-    private final LineChart<Number, Number> chart;
+    private final JavaCodeArea handlerCode = new JavaCodeArea();
+    private final Label handlerCodeHeader = new Label();
+    private final VBox handlerBox;
+    private final VBox chartBox;
 
+    private final LineChart<Number, Number> chart;
     private final VBox node;
 
     public PerfCompareTab() {
+        for (Era era : Era.values()) {
+            panels.put(era, new StatsPanel(era));
+            series.put(era, new XYChart.Series<>());
+        }
         chart = buildChart();
 
-        HBox panels = new HBox(12, pastPanel.getNode(), futurePanel.getNode());
-        panels.setAlignment(Pos.TOP_CENTER);
+        // Chronological order, so the story reads left to right.
+        HBox panelRow = new HBox(12);
+        for (Era era : Era.values()) {
+            panelRow.getChildren().add(panels.get(era).getNode());
+        }
+        panelRow.setAlignment(Pos.TOP_CENTER);
+        showWorkaroundPanel(false);
 
         comparison.getStyleClass().add("comparison-line");
         comparison.setMaxWidth(Double.MAX_VALUE);
         comparison.setAlignment(Pos.CENTER);
-        comparison.setVisible(false);
-        comparison.setManaged(false);
+        hide(comparison);
+
+        workaroundLine.getStyleClass().add("workaround-line");
+        workaroundLine.setMaxWidth(Double.MAX_VALUE);
+        workaroundLine.setAlignment(Pos.CENTER);
+        workaroundLine.setWrapText(true);
+        hide(workaroundLine);
 
         mismatchWarning.getStyleClass().add("warning-text");
-        mismatchWarning.setVisible(false);
-        mismatchWarning.setManaged(false);
+        hide(mismatchWarning);
 
-        VBox chartBox = new VBox(6, chartLegend(), chart);
+        chartBox = new VBox(6, chartLegend(), chart);
         VBox.setVgrow(chart, Priority.ALWAYS);
         VBox.setVgrow(chartBox, Priority.ALWAYS);
         chart.setMinHeight(200);
 
+        handlerBox = buildHandlerView();
+        hide(handlerBox);
+
         VBox content = new VBox(10, buildControls(), buildCaptions(), mismatchWarning,
-                panels, comparison, chartBox);
+                panelRow, comparison, workaroundLine, chartBox, handlerBox);
         content.setPadding(new Insets(12));
 
         ScrollPane scroller = new ScrollPane(content);
@@ -103,13 +138,33 @@ public final class PerfCompareTab implements DemoTab {
 
         node = new VBox(scroller);
 
-        runButton.getStyleClass().addAll("run-button", modeToggle.getMode().styleClass());
-        modeToggle.modeProperty().addListener((obs, was, is) -> {
+        runButton.getStyleClass().addAll("run-button", eraPicker.getValue().styleClass());
+        eraPicker.valueProperty().addListener((obs, was, is) -> {
             runButton.getStyleClass().setAll("run-button", is.styleClass());
+            refreshHandlerCode();
             refreshMismatchWarning();
         });
+        refreshHandlerCode();
 
         setRunning(false);
+    }
+
+    private static void hide(javafx.scene.Node node) {
+        node.setVisible(false);
+        node.setManaged(false);
+    }
+
+    private static void show(javafx.scene.Node node, boolean visible) {
+        node.setVisible(visible);
+        node.setManaged(visible);
+    }
+
+    /**
+     * The workaround is a reveal, not a default. The room sees two panels, hears "but I
+     * would just use CompletableFuture", and only then does the third appear.
+     */
+    private void showWorkaroundPanel(boolean visible) {
+        show(panels.get(Era.WORKAROUND).getNode(), visible);
     }
 
     // ------------------------------------------------------------------ controls
@@ -126,6 +181,16 @@ public final class PerfCompareTab implements DemoTab {
                 "How many requests are in flight at once.\n"
                         + "The contrast is sharpest when this is well above the server's "
                         + "200-thread pool."));
+
+        handlersButton.getStyleClass().add("secondary-button");
+        handlersButton.setTooltip(new Tooltip(
+                "Swap the chart for the handler that era actually runs.\n"
+                        + "Past and present share one; the workaround needs its own."));
+        handlersButton.selectedProperty().addListener((o, was, is) -> {
+            show(handlerBox, is);
+            show(chartBox, !is);
+            handlersButton.setText(is ? "Show the chart" : "Show the handlers");
+        });
 
         Runnable onConfigChange = this::refreshMismatchWarning;
         endpointBox.valueProperty().addListener((o, a, b) -> onConfigChange.run());
@@ -145,7 +210,8 @@ public final class PerfCompareTab implements DemoTab {
 
         status.getStyleClass().add("elapsed-timer");
 
-        for (Region control : new Region[]{endpointBox, runButton, stopButton, resetButton}) {
+        for (Region control : new Region[]{endpointBox, runButton, stopButton, resetButton,
+                handlersButton}) {
             // Never shrink a control below the width of its own text. Combined with the
             // FlowPane below, a too-narrow window wraps the row instead of turning every
             // label into "...".
@@ -156,10 +222,11 @@ public final class PerfCompareTab implements DemoTab {
                 field("Endpoint", endpointBox),
                 field("Requests", requestsPicker.getNode()),
                 field("Concurrency", concurrencyPicker.getNode()),
-                field("", modeToggle.getNode()),
+                field("", eraPicker.getNode()),
                 field("", runButton),
                 field("", stopButton),
-                field("", resetButton));
+                field("", resetButton),
+                field("", handlersButton));
         row.setAlignment(Pos.BOTTOM_LEFT);
         return new VBox(row);
     }
@@ -212,33 +279,68 @@ public final class PerfCompareTab implements DemoTab {
         lineChart.setTitle(null);
 
         // The built-in legend is hidden and we draw our own, but keep these honest anyway.
-        pastSeries.setName("past");
-        futureSeries.setName("present");
-        lineChart.getData().add(pastSeries);
-        lineChart.getData().add(futureSeries);
-        styleSeries(pastSeries, Mode.PAST);
-        styleSeries(futureSeries, Mode.FUTURE);
+        for (Era era : Era.values()) {
+            XYChart.Series<Number, Number> s = series.get(era);
+            s.setName(era.shortLabel());
+            lineChart.getData().add(s);
+            styleSeries(s, era);
+        }
         return lineChart;
     }
 
     /** JavaFX hands series rotating default-colour classes, so pin the stroke directly. */
-    private static void styleSeries(XYChart.Series<Number, Number> series, Mode mode) {
+    private static void styleSeries(XYChart.Series<Number, Number> series, Era era) {
         if (series.getNode() != null) {
-            series.getNode().setStyle("-fx-stroke: " + mode.accent() + "; -fx-stroke-width: 2.5;");
+            series.getNode().setStyle("-fx-stroke: " + era.accent() + "; -fx-stroke-width: 2.5;");
         }
     }
 
     private HBox chartLegend() {
-        HBox legend = new HBox(16, legendItem(Mode.PAST), legendItem(Mode.FUTURE));
+        List<javafx.scene.Node> items = new ArrayList<>();
+        for (Era era : Era.values()) {
+            items.add(legendItem(era));
+        }
+        HBox legend = new HBox(16);
+        legend.getChildren().addAll(items);
         legend.setAlignment(Pos.CENTER_LEFT);
         return legend;
     }
 
-    private static Label legendItem(Mode mode) {
-        Label label = new Label("●  " + mode.label());
+    private static Label legendItem(Era era) {
+        Label label = new Label("●  " + era.shortLabel());
         label.getStyleClass().add("caption");
-        label.setStyle("-fx-text-fill: " + mode.accent() + "; -fx-font-weight: bold;");
+        label.setStyle("-fx-text-fill: " + era.accent() + "; -fx-font-weight: bold;");
         return label;
+    }
+
+    // ------------------------------------------------------------- handler code view
+
+    /**
+     * The counterweight to the numbers. Async ties with virtual threads on throughput, so
+     * a panel showing only req/s would quietly argue against Loom. This shows what each
+     * era costs to write, driven by the same buttons that drive the runs.
+     */
+    private VBox buildHandlerView() {
+        handlerCodeHeader.getStyleClass().add("handler-code-header");
+        handlerCode.setEditable(false);
+
+        Region codeNode = handlerCode.getNode();
+        codeNode.getStyleClass().add("editor-frame");
+        codeNode.setMinHeight(240);
+        VBox.setVgrow(codeNode, Priority.ALWAYS);
+
+        VBox box = new VBox(6, handlerCodeHeader, codeNode);
+        VBox.setVgrow(box, Priority.ALWAYS);
+        return box;
+    }
+
+    private void refreshHandlerCode() {
+        Era era = eraPicker.getValue();
+        handlerCode.loadSource(OrderServer.handlerSourceFor(era));
+        handlerCodeHeader.setText(String.format(Locale.US,
+                "%s  ·  OrderServer handler  ·  %d lines of code",
+                era.shortLabel().toUpperCase(Locale.US),
+                OrderServer.handlerLineCount(era)));
     }
 
     private static String thousands(Integer value) {
@@ -252,23 +354,23 @@ public final class PerfCompareTab implements DemoTab {
         if (generator.isRunning()) {
             return;
         }
-        Mode mode = modeToggle.getMode();
+        Era era = eraPicker.getValue();
         OrderServer.Endpoint endpoint = endpointBox.getValue();
         int total = requestsPicker.getValue();
         int concurrency = concurrencyPicker.getValue();
 
         setRunning(true);
         status.setText("starting server…");
-        seriesFor(mode).getData().clear();
+        series.get(era).getData().clear();
 
         // Server start (and restart on a mode change) is off the FX thread; the generator
         // itself must be kicked off back on it because it drives a Timeline.
         Thread starter = new Thread(() -> {
             try {
-                server.startFor(mode);
+                server.startFor(era);
                 int port = server.port();
                 Platform.runLater(() ->
-                        generator.start(mode, port, endpoint, total, concurrency, listener(mode)));
+                        generator.start(era, port, endpoint, total, concurrency, listener(era)));
             } catch (Throwable t) {
                 Platform.runLater(() -> {
                     setRunning(false);
@@ -281,16 +383,16 @@ public final class PerfCompareTab implements DemoTab {
         starter.start();
     }
 
-    private LoadGenerator.Listener listener(Mode mode) {
+    private LoadGenerator.Listener listener(Era era) {
         return new LoadGenerator.Listener() {
             @Override
             public void onSamples(List<LoadGenerator.Sample> batch) {
-                XYChart.Series<Number, Number> series = seriesFor(mode);
+                XYChart.Series<Number, Number> line = series.get(era);
                 for (LoadGenerator.Sample sample : batch) {
-                    series.getData().add(
+                    line.getData().add(
                             new XYChart.Data<>(sample.elapsedSeconds(), sample.latencyMillis()));
                 }
-                styleSeries(series, mode);
+                styleSeries(line, era);
             }
 
             @Override
@@ -308,7 +410,10 @@ public final class PerfCompareTab implements DemoTab {
             public void onDone(RunResult result) {
                 setRunning(false);
                 status.setText("");
-                panelFor(mode).setResult(result);
+                panels.get(era).setResult(result);
+                if (era == Era.WORKAROUND) {
+                    showWorkaroundPanel(true);
+                }
                 refreshComparison();
                 refreshMismatchWarning();
             }
@@ -317,11 +422,11 @@ public final class PerfCompareTab implements DemoTab {
             public void onStopped(int completed) {
                 setRunning(false);
                 status.setText("");
-                seriesFor(mode).getData().clear();
+                series.get(era).getData().clear();
                 showWarning(String.format(Locale.US,
-                        "Run stopped after %,d requests — %s panel still shows its last "
+                        "Run stopped after %,d requests — the %s panel still shows its last "
                                 + "complete run.", completed,
-                        mode == Mode.PAST ? "the past" : "the present"));
+                        era.shortLabel()));
             }
 
             @Override
@@ -333,28 +438,35 @@ public final class PerfCompareTab implements DemoTab {
         };
     }
 
-    private StatsPanel panelFor(Mode mode) {
-        return mode == Mode.PAST ? pastPanel : futurePanel;
-    }
-
-    private XYChart.Series<Number, Number> seriesFor(Mode mode) {
-        return mode == Mode.PAST ? pastSeries : futureSeries;
-    }
-
-    /** The sentence the audience remembers. Only shown once both sides have run. */
+    /** The sentence the audience remembers. Only shown once past and present have run. */
     private void refreshComparison() {
-        RunResult past = pastPanel.getResult();
-        RunResult future = futurePanel.getResult();
-        boolean both = past != null && future != null;
-        comparison.setVisible(both);
-        comparison.setManaged(both);
-        if (!both) {
-            return;
+        RunResult past = panels.get(Era.PAST).getResult();
+        RunResult present = panels.get(Era.PRESENT).getResult();
+        RunResult workaround = panels.get(Era.WORKAROUND).getResult();
+
+        boolean both = past != null && present != null;
+        show(comparison, both);
+        if (both) {
+            double ratio = past.throughput() <= 0 ? 0 : present.throughput() / past.throughput();
+            comparison.setText(String.format(Locale.US,
+                    "Present: %.1f× throughput,  p99 latency %,d ms → %,d ms",
+                    ratio, past.p99(), present.p99()));
         }
-        double ratio = past.throughput() <= 0 ? 0 : future.throughput() / past.throughput();
-        comparison.setText(String.format(Locale.US,
-                "Present: %.1f× throughput,  p99 latency %,d ms → %,d ms",
-                ratio, past.p99(), future.p99()));
+
+        // The second line is the one that answers "why not just use CompletableFuture?".
+        // It only appears once the room has actually seen async match, because until then
+        // it would be a claim rather than a measurement.
+        boolean showWorkaround = workaround != null && present != null;
+        show(workaroundLine, showWorkaround);
+        if (showWorkaround) {
+            int asyncLines = OrderServer.handlerLineCount(Era.WORKAROUND);
+            int blockingLines = OrderServer.handlerLineCount(Era.PRESENT);
+            workaroundLine.setText(String.format(Locale.US,
+                    "Async got there too — %,.0f req/s on %d threads, against %,.0f. "
+                            + "It cost %d lines of handler instead of %d.",
+                    workaround.throughput(), Era.asyncThreads(), present.throughput(),
+                    asyncLines, blockingLines));
+        }
     }
 
     /**
@@ -362,11 +474,19 @@ public final class PerfCompareTab implements DemoTab {
      * about.
      */
     private void refreshMismatchWarning() {
-        RunResult past = pastPanel.getResult();
-        RunResult future = futurePanel.getResult();
-        if (past != null && future != null && !past.sameConfigAs(future)) {
-            showWarning("⚠  The two panels were run with different settings, so this "
-                    + "comparison is not valid. Re-run one side with matching settings.");
+        List<RunResult> results = new ArrayList<>();
+        for (Era era : Era.values()) {
+            RunResult result = panels.get(era).getResult();
+            if (result != null) {
+                results.add(result);
+            }
+        }
+        RunResult first = results.isEmpty() ? null : results.get(0);
+        boolean mismatched = results.stream().anyMatch(r -> !r.sameConfigAs(first));
+        if (mismatched) {
+            showWarning("⚠  These panels were run with different settings, so the "
+                    + "comparison is not valid. Re-run the odd one out with matching "
+                    + "settings.");
         } else {
             hideWarning();
         }
@@ -374,20 +494,18 @@ public final class PerfCompareTab implements DemoTab {
 
     private void showWarning(String message) {
         mismatchWarning.setText(message);
-        mismatchWarning.setVisible(true);
-        mismatchWarning.setManaged(true);
+        show(mismatchWarning, true);
     }
 
     private void hideWarning() {
-        mismatchWarning.setVisible(false);
-        mismatchWarning.setManaged(false);
+        hide(mismatchWarning);
     }
 
     private void setRunning(boolean running) {
         runButton.setDisable(running);
         stopButton.setDisable(!running);
         resetButton.setDisable(running);
-        modeToggle.setDisable(running);
+        eraPicker.setDisable(running);
         endpointBox.setDisable(running);
         requestsPicker.setDisable(running);
         concurrencyPicker.setDisable(running);
@@ -404,12 +522,13 @@ public final class PerfCompareTab implements DemoTab {
         if (generator.isRunning()) {
             return;
         }
-        pastPanel.clear();
-        futurePanel.clear();
-        pastSeries.getData().clear();
-        futureSeries.getData().clear();
-        comparison.setVisible(false);
-        comparison.setManaged(false);
+        for (Era era : Era.values()) {
+            panels.get(era).clear();
+            series.get(era).getData().clear();
+        }
+        showWorkaroundPanel(false);
+        hide(comparison);
+        hide(workaroundLine);
         hideWarning();
         status.setText("");
     }

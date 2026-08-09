@@ -4,7 +4,7 @@ import javafx.animation.Animation;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
 import javafx.application.Platform;
-import loomdemo.Mode;
+import loomdemo.Era;
 import loomdemo.server.OrderServer;
 
 import java.net.URI;
@@ -27,12 +27,12 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Fires N requests at the embedded server at a fixed concurrency and records the latency
  * of every one.
  *
- * <p><strong>The client always uses virtual threads, in both modes.</strong> That is
+ * <p><strong>The client always uses virtual threads, in every era.</strong> That is
  * deliberate and it is the only thing that makes the comparison mean anything: if the load
- * generator itself ran on a bounded platform-thread pool, the past-mode numbers would be
+ * generator itself ran on a bounded platform-thread pool, the past-era numbers would be
  * measuring the client's own queueing rather than the server's. One virtual thread per
  * request, a semaphore holding concurrency at the configured level, and the only variable
- * left between the two runs is the server's executor.
+ * left between runs is how the server handles blocking.
  *
  * <p>Each run has two phases:
  *
@@ -46,9 +46,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * server: macOS caps the listen backlog at {@code kern.ipc.somaxconn} (128) and resets
  * connections that overflow it, and a cold JIT makes the first few hundred requests
  * slower than the rest. Neither has anything to do with virtual threads, and both would
- * land hardest on the future side, where every request really is in flight at once. A
- * fresh {@link HttpClient} is built per run so a pool warmed by the previous mode cannot
- * flatter the next one.
+ * land hardest on the two sides that keep every request in flight at once — virtual
+ * threads and async. A fresh {@link HttpClient} is built per run so a pool warmed by the
+ * previous era cannot flatter the next one.
  */
 public final class LoadGenerator {
 
@@ -109,7 +109,7 @@ public final class LoadGenerator {
         return running;
     }
 
-    public void start(Mode mode, int port, OrderServer.Endpoint endpoint,
+    public void start(Era era, int port, OrderServer.Endpoint endpoint,
                       int totalRequests, int concurrency, Listener listener) {
         if (running) {
             listener.onError("A load test is already running.");
@@ -123,7 +123,7 @@ public final class LoadGenerator {
         measureStartNanos = System.nanoTime();
 
         Thread orchestrator = new Thread(
-                () -> runLoad(mode, port, endpoint, totalRequests, concurrency, listener),
+                () -> runLoad(era, port, endpoint, totalRequests, concurrency, listener),
                 "load-generator");
         orchestrator.setDaemon(true);
         orchestrator.start();
@@ -136,7 +136,7 @@ public final class LoadGenerator {
         drainTimeline.play();
     }
 
-    private void runLoad(Mode mode, int port, OrderServer.Endpoint endpoint,
+    private void runLoad(Era era, int port, OrderServer.Endpoint endpoint,
                          int totalRequests, int concurrency, Listener listener) {
         HttpClient httpClient = HttpClient.newBuilder()
                 // com.sun.net.httpserver speaks 1.1 only; pinning it also stops HTTP/2
@@ -156,7 +156,7 @@ public final class LoadGenerator {
             }
 
             phase = Phase.MEASURING;
-            RunResult result = measure(httpClient, mode, port, endpoint,
+            RunResult result = measure(httpClient, era, port, endpoint,
                     totalRequests, concurrency);
             boolean wasCancelled = cancelled;
             int completed = completedCount.get();
@@ -220,7 +220,7 @@ public final class LoadGenerator {
         }
     }
 
-    private RunResult measure(HttpClient httpClient, Mode mode, int port,
+    private RunResult measure(HttpClient httpClient, Era era, int port,
                               OrderServer.Endpoint endpoint, int totalRequests, int concurrency) {
         long[] latencies = new long[totalRequests];
         AtomicInteger errors = new AtomicInteger();
@@ -243,7 +243,7 @@ public final class LoadGenerator {
         } // close() waits for every task
 
         long elapsed = (System.nanoTime() - measureStartNanos) / 1_000_000L;
-        return RunResult.from(mode, endpoint, totalRequests, concurrency, elapsed,
+        return RunResult.from(era, endpoint, totalRequests, concurrency, elapsed,
                 latencies, completedCount.get(), errors.get(), describe(errorKinds));
     }
 

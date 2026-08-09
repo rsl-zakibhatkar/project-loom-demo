@@ -27,6 +27,17 @@
     -future-wash: #E2F5F7;
     -future-on-accent: #FFFFFF;
 
+    /*
+     * The workaround era: async callbacks. Violet because it must not read as either
+     * identity colour — orange is "before Loom", teal is "after", and the whole point of
+     * this third side is that it is neither. It sits near -speaker-a (#5E35B1), which is
+     * fine: that colour only ever appears in the Threads 101 console, two tabs away.
+     */
+    -workaround-accent: #7E57C2;
+    -workaround-ink: #5E35B1;
+    -workaround-wash: #F0EAFA;
+    -workaround-on-accent: #FFFFFF;
+
     -surface: #FFFFFF;
     -surface-sunken: #F4F5F7;
     -ink: #16191D;
@@ -63,6 +74,11 @@
     -future-ink: #4DD0E1;
     -future-wash: #13282C;
     -future-on-accent: #FFFFFF;
+
+    -workaround-accent: #7E57C2;
+    -workaround-ink: #B39DDB;
+    -workaround-wash: #241C33;
+    -workaround-on-accent: #FFFFFF;
 
     -surface: #23262B;
     -surface-sunken: #1A1D21;
@@ -207,6 +223,11 @@
     -fx-text-fill: -past-on-accent;
 }
 
+.run-button.workaround {
+    -fx-background-color: -workaround-accent;
+    -fx-text-fill: -workaround-on-accent;
+}
+
 .run-button:hover {
     -fx-opacity: 0.9;
 }
@@ -274,6 +295,11 @@
 .mode-button:selected.future {
     -fx-background-color: -future-accent;
     -fx-text-fill: -future-on-accent;
+}
+
+.mode-button:selected.workaround {
+    -fx-background-color: -workaround-accent;
+    -fx-text-fill: -workaround-on-accent;
 }
 
 /*
@@ -549,6 +575,10 @@
     -fx-border-color: -future-accent;
 }
 
+.stats-panel.workaround {
+    -fx-border-color: -workaround-accent;
+}
+
 .panel-header {
     -fx-font-size: 1.1em;
     -fx-font-weight: bold;
@@ -567,6 +597,11 @@
     -fx-text-fill: -future-on-accent;
 }
 
+.panel-header.workaround {
+    -fx-background-color: -workaround-accent;
+    -fx-text-fill: -workaround-on-accent;
+}
+
 .panel-body {
     -fx-padding: 0.7em 0.9em 0.7em 0.9em;
     -fx-spacing: 0.35em;
@@ -579,6 +614,7 @@
 
 .hero-number.past  { -fx-text-fill: -past-ink; }
 .hero-number.future{ -fx-text-fill: -future-ink; }
+.hero-number.workaround { -fx-text-fill: -workaround-ink; }
 .hero-number.empty { -fx-text-fill: -ink-muted; }
 
 .hero-unit {
@@ -638,6 +674,28 @@
 
 .comparison-line .highlight {
     -fx-fill: -future-ink;
+}
+
+/*
+ * The answer to "why not just use CompletableFuture?". Deliberately a size below the
+ * headline: it is a rebuttal, not the thesis, and it has to sit under the big line
+ * without competing with it.
+ */
+.workaround-line {
+    -fx-font-size: 1.25em;
+    -fx-font-weight: bold;
+    -fx-text-fill: -workaround-ink;
+    -fx-wrap-text: true;
+    -fx-padding: 0.4em 0.8em 0.4em 0.8em;
+    -fx-background-color: -workaround-wash;
+    -fx-background-radius: 0.5em;
+    -fx-alignment: center;
+}
+
+.handler-code-header {
+    -fx-font-size: 1.15em;
+    -fx-font-weight: bold;
+    -fx-text-fill: -ink;
 }
 
 /* --------------------------------------------------------------------- chart */

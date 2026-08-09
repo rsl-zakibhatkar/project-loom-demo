@@ -44,9 +44,19 @@ public final class SegmentedPicker<T> {
     private boolean suppress;
 
     public SegmentedPicker(List<T> options, Function<T, String> labeller, T initial) {
+        this(options, labeller, initial, option -> "segmented-button");
+    }
+
+    /**
+     * As above, but each button also carries a style class of its own — used by the era
+     * picker so every option keeps its identity colour when selected, the way
+     * {@link ModeToggle} does for two.
+     */
+    public SegmentedPicker(List<T> options, Function<T, String> labeller, T initial,
+                           Function<T, String> styleClasser) {
         for (T option : options) {
             ToggleButton button = new ToggleButton(labeller.apply(option));
-            button.getStyleClass().addAll("mode-button", "segmented-button");
+            button.getStyleClass().addAll("mode-button", styleClasser.apply(option));
             button.setToggleGroup(group);
             button.setUserData(option);
             // Never shrink below the label's own width. A "20,000" truncated to "2..." is
