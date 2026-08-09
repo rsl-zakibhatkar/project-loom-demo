@@ -21,6 +21,11 @@ import javafx.stage.Stage;
 import loomdemo.ui.PerfCompareTab;
 import loomdemo.ui.Scoreboard;
 import loomdemo.ui.ThreadBombTab;
+import loomdemo.ui.Threads101Tab;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * Application shell: title bar, the persistent scoreboard, the two demo tabs and the
@@ -32,8 +37,7 @@ import loomdemo.ui.ThreadBombTab;
  */
 public class Main extends Application {
 
-    private ThreadBombTab threadBombTab;
-    private PerfCompareTab perfCompareTab;
+    private final List<DemoTab> tabs = new ArrayList<>();
     private TabPane tabPane;
 
     @Override
@@ -44,15 +48,16 @@ public class Main extends Application {
         Theme theme = new Theme(root);
         Scoreboard scoreboard = new Scoreboard();
 
-        threadBombTab = new ThreadBombTab(scoreboard);
-        perfCompareTab = new PerfCompareTab();
+        Threads101Tab threads101Tab = new Threads101Tab();
+        ThreadBombTab threadBombTab = new ThreadBombTab(scoreboard);
+        PerfCompareTab perfCompareTab = new PerfCompareTab();
 
-        Tab bombTab = new Tab("Thread Bomb", threadBombTab.getNode());
-        bombTab.setClosable(false);
-        Tab perfTab = new Tab("Performance Comparison", perfCompareTab.getNode());
-        perfTab.setClosable(false);
-
-        tabPane = new TabPane(bombTab, perfTab);
+        // Order is the talk's order: what a thread is, then what platform threads cost,
+        // then what that costs a server.
+        tabPane = new TabPane(
+                demoTab("Threads 101", threads101Tab.getNode(), threads101Tab),
+                demoTab("Thread Bomb", threadBombTab.getNode(), threadBombTab),
+                demoTab("Performance Comparison", perfCompareTab.getNode(), perfCompareTab));
         tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
 
         root.setTop(buildTopBar(theme, scoreboard));
@@ -118,11 +123,18 @@ public class Main extends Application {
     }
 
     private void installShortcuts(Scene scene, Theme theme) {
-        put(scene, KeyCode.R, () -> current().runDemo());
-        put(scene, KeyCode.PERIOD, () -> current().stopDemo());
-        put(scene, KeyCode.K, () -> current().clearOutput());
+        put(scene, KeyCode.R, () -> onCurrent(DemoTab::runDemo));
+        put(scene, KeyCode.PERIOD, () -> onCurrent(DemoTab::stopDemo));
+        put(scene, KeyCode.K, () -> onCurrent(DemoTab::clearOutput));
         put(scene, KeyCode.P, theme::togglePresentation);
         put(scene, KeyCode.D, theme::toggleDarkManually);
+    }
+
+    private void onCurrent(Consumer<DemoTab> action) {
+        DemoTab tab = current();
+        if (tab != null) {
+            action.accept(tab);
+        }
     }
 
     private void put(Scene scene, KeyCode code, Runnable action) {
@@ -138,20 +150,33 @@ public class Main extends Application {
                 });
     }
 
+    /**
+     * Build a tab and record which demo it drives.
+     *
+     * <p>The shortcuts used to find the demo by tab index, which silently sent ⌘R to the
+     * wrong tab the moment a third one existed. Carrying the demo on the tab itself makes
+     * that impossible to get wrong again.
+     */
+    private Tab demoTab(String title, javafx.scene.Node content, DemoTab demo) {
+        Tab tab = new Tab(title, content);
+        tab.setClosable(false);
+        tab.setUserData(demo);
+        tabs.add(demo);
+        return tab;
+    }
+
     private DemoTab current() {
-        return tabPane.getSelectionModel().getSelectedIndex() == 0 ? threadBombTab : perfCompareTab;
+        Tab selected = tabPane.getSelectionModel().getSelectedItem();
+        return selected == null ? null : (DemoTab) selected.getUserData();
     }
 
     private void shutdown() {
-        try {
-            threadBombTab.shutdown();
-        } catch (Throwable ignored) {
-            // best effort
-        }
-        try {
-            perfCompareTab.shutdown();
-        } catch (Throwable ignored) {
-            // best effort
+        for (DemoTab tab : tabs) {
+            try {
+                tab.shutdown();
+            } catch (Throwable ignored) {
+                // best effort — one tab failing to tear down must not block the others
+            }
         }
     }
 
