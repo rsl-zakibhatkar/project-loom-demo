@@ -34,6 +34,16 @@
     -hairline: #D3D8DF;
     -danger: #C62828;
 
+    /*
+     * Threads 101 tints console lines by which thread printed them. These are
+     * deliberately NOT the past/future identity colours — orange and teal mean
+     * "before Loom" and "after Loom" all through the talk, and a cook-1 that looked
+     * orange would quietly say something untrue.
+     */
+    -speaker-a: #5E35B1;
+    -speaker-b: #C2185B;
+    -speaker-c: #2E7D32;
+
     -fx-base: #F0F1F3;
     -fx-background: #FFFFFF;
     -fx-control-inner-background: #FFFFFF;
@@ -60,6 +70,10 @@
     -ink-muted: #A2ACB9;
     -hairline: #3A4049;
     -danger: #FF6B6B;
+
+    -speaker-a: #B39DDB;
+    -speaker-b: #F48FB1;
+    -speaker-c: #A5D6A7;
 
     -fx-base: #2A2E34;
     -fx-background: #1A1D21;
@@ -110,6 +124,16 @@
     -fx-font-size: 0.95em;
     -fx-text-fill: -danger;
     -fx-font-weight: bold;
+    -fx-wrap-text: true;
+}
+
+/*
+ * Not .caption — this is the one line telling the audience what to watch for, so it is
+ * full ink and readable from the back, where .caption is small grey supporting text.
+ */
+.snippet-caption {
+    -fx-font-size: 1.15em;
+    -fx-text-fill: -ink;
     -fx-wrap-text: true;
 }
 
@@ -252,6 +276,15 @@
     -fx-text-fill: -future-on-accent;
 }
 
+/*
+ * Threads 101 comes before the past/future distinction exists, so its picker selects in
+ * plain ink rather than borrowing either identity colour.
+ */
+.snippet-button:selected {
+    -fx-background-color: -ink;
+    -fx-text-fill: -surface;
+}
+
 .mode-button:disabled {
     -fx-opacity: 0.45;
 }
@@ -288,6 +321,43 @@
 .console-text:focused {
     -fx-faint-focus-color: transparent;
     -fx-focus-color: transparent;
+}
+
+/*
+ * The Threads 101 console. RichTextFX rather than a TextArea so single lines can be
+ * coloured — which means the spans below are Text nodes and take -fx-fill, not
+ * -fx-text-fill. Same trap as the .code-area syntax classes.
+ */
+.stream-console {
+    -fx-background-color: -surface;
+}
+
+.stream-console .text {
+    -fx-font-family: "SF Mono", "Menlo", "Monaco", monospace;
+    -fx-fill: -ink;
+}
+
+.stream-console .caret {
+    -fx-stroke: transparent;
+}
+
+.stream-console .selection {
+    -fx-fill: #0097A755;
+}
+
+/* Which thread printed the line. Assigned in first-seen order and then kept. */
+.stream-console .speaker-a { -fx-fill: -speaker-a; -fx-font-weight: bold; }
+.stream-console .speaker-b { -fx-fill: -speaker-b; -fx-font-weight: bold; }
+.stream-console .speaker-c { -fx-fill: -speaker-c; -fx-font-weight: bold; }
+
+/* The app talking about the run, rather than the run talking. */
+.stream-console .system-line {
+    -fx-fill: -ink-muted;
+}
+
+.stream-console .run-divider {
+    -fx-fill: -ink-muted;
+    -fx-font-weight: bold;
 }
 
 .elapsed-timer {
