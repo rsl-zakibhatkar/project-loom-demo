@@ -208,8 +208,9 @@ public final class PerfCompareTab implements DemoTab {
         lineChart.setAnimated(false);   // animation fights a live-updating series
         lineChart.setTitle(null);
 
+        // The built-in legend is hidden and we draw our own, but keep these honest anyway.
         pastSeries.setName("past");
-        futureSeries.setName("future");
+        futureSeries.setName("present");
         lineChart.getData().add(pastSeries);
         lineChart.getData().add(futureSeries);
         styleSeries(pastSeries, Mode.PAST);
@@ -327,7 +328,7 @@ public final class PerfCompareTab implements DemoTab {
                 showWarning(String.format(Locale.US,
                         "Run stopped after %,d requests — %s panel still shows its last "
                                 + "complete run.", completed,
-                        mode == Mode.PAST ? "the past" : "the future"));
+                        mode == Mode.PAST ? "the past" : "the present"));
             }
 
             @Override
@@ -359,7 +360,7 @@ public final class PerfCompareTab implements DemoTab {
         }
         double ratio = past.throughput() <= 0 ? 0 : future.throughput() / past.throughput();
         comparison.setText(String.format(Locale.US,
-                "Future: %.1f× throughput,  p99 latency %,d ms → %,d ms",
+                "Present: %.1f× throughput,  p99 latency %,d ms → %,d ms",
                 ratio, past.p99(), future.p99()));
     }
 

@@ -94,7 +94,7 @@ public final class DemoSources {
                 static final int TASKS = 1_000_000;
 
                 public static void main(String[] args) throws Exception {
-                    System.out.println("FUTURE — virtual threads");
+                    System.out.println("PRESENT — virtual threads, since Java 21");
                     System.out.printf("Starting %,d virtual threads, each sleeping 1 second...%n", TASKS);
                     System.out.println();
 

@@ -24,7 +24,7 @@ public final class Scoreboard {
 
     public Scoreboard() {
         HBox past = chip(Mode.PAST, "PAST", pastValue);
-        HBox future = chip(Mode.FUTURE, "FUTURE", futureValue);
+        HBox future = chip(Mode.FUTURE, "PRESENT", futureValue);
 
         Label divider = new Label("|");
         divider.getStyleClass().add("score-divider");

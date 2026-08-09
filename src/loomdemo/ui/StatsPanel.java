@@ -37,7 +37,7 @@ public final class StatsPanel {
 
         Label header = new Label(mode == Mode.PAST
                 ? "PAST  ·  platform threads, pool of 200"
-                : "FUTURE  ·  virtual threads");
+                : "PRESENT  ·  virtual threads");
         header.getStyleClass().addAll("panel-header", mode.styleClass());
         header.setMaxWidth(Double.MAX_VALUE);
 

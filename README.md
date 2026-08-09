@@ -7,10 +7,14 @@ threads. Three demos, switchable via tabs:
 2. **Thread Bomb** — what platform threads cost
 3. **Performance Comparison** — what that cost does to a server
 
-Demos 2 and 3 carry a past/future toggle:
+Demos 2 and 3 carry a past/present toggle:
 
 - **Take me to the past** — platform threads, bounded pools · orange `#FFAB40`
-- **Take me to the future** — virtual threads · teal `#0097A7`
+- **Take me to the present** — virtual threads, since Java 21 · teal `#0097A7`
+
+Deliberately *present*, not *future*: virtual threads went final in Java 21 in September
+2023. Calling them the future on stage makes them sound like something to wait for rather
+than something the room could have shipped two years ago.
 
 Built with JavaFX on Java 21, shipped as a `.dmg` with a bundled runtime. The presenting
 machine needs no JDK and no network.
@@ -133,11 +137,11 @@ is editable: change `i < 5` to `i < 20` and re-run if you want a longer interlea
 3. **Run** (`⌘R`). The console streams the thread count climbing.
 4. It dies in well under a second. The punchline lands in huge orange type:
    **`Died at thread #2,021`**
-5. Switch to **Take me to the future**. The editor swaps to the virtual-thread version.
+5. Switch to **Take me to the present**. The editor swaps to the virtual-thread version.
    (If you edited the code, you get an inline prompt before it is discarded.)
 6. **Run**. Watch it climb through a million, then:
    **`Completed 1,000,000 tasks in ~4.9s`**
-7. The scoreboard at the top now reads `PAST died at #2,021 | FUTURE 1,000,000 ✓`. It
+7. The scoreboard at the top now reads `PAST died at #2,021 | PRESENT 1,000,000 ✓`. It
    stays there for the rest of the talk, including when you switch tabs.
 
 **Numbers to expect.** The death point is whatever your machine's thread limit allows —
@@ -153,11 +157,11 @@ yours during the warm-up run so you can quote it confidently.
    - It briefly says *warming up connections…* — that is the load generator opening its
      connection pool before the clock starts. Then the orange line climbs on the chart.
    - Left panel fills: roughly **1,850 req/s, p99 ~1,050 ms**.
-3. Switch to **Take me to the future**, press **Run** again.
+3. Switch to **Take me to the present**, press **Run** again.
    - Right panel fills: roughly **12,000+ req/s, p99 ~160 ms**. The teal line hugs the
      bottom of the chart.
 4. The line underneath is the one they will remember:
-   **`Future: 6.9× throughput, p99 latency 1,084 ms → 160 ms`**
+   **`Present: 6.9× throughput, p99 latency 1,084 ms → 160 ms`**
 
 **Say this out loud**: the handler code is identical in both runs. The only thing that
 changed is the executor the server hands requests to. And the load generator uses virtual
@@ -195,7 +199,7 @@ comparison is invalid. Re-run one side to match.
 The past-mode program deliberately exhausts the OS thread limit. Running it in the app's
 own process would take the window down with it. Instead the editor's contents are written
 to a temp file and executed by a child process using single-file source execution
-(`java Demo.java`), with `-Xmx512m -Xss1m` for past and `-Xmx2g` for future. Its stdout
+(`java Demo.java`), with `-Xmx512m -Xss1m` for past and `-Xmx2g` for present. Its stdout
 and stderr are merged and streamed back into the console at about 30 Hz.
 
 The child JVM is the runtime bundled inside the `.app`, so nothing needs to be installed
@@ -239,7 +243,7 @@ different executor — `newFixedThreadPool(200)` versus
 Each run has an untimed warm-up that opens one pooled connection per unit of concurrency,
 then the timed run. The warm-up is not cosmetic: without it, the measured phase opens
 every connection at once, macOS's 128-entry accept queue (`kern.ipc.somaxconn`) resets the
-overflow, and you get around a hundred errors *on the future side only* — where every
+overflow, and you get around a hundred errors *on the virtual-thread side only* — where every
 request really is in flight at once. It reads as "virtual threads are flaky" when it is
 really an artefact of the test rig. The server's idle keep-alive ceiling is raised past
 the highest offered concurrency for the same reason. With both in place, every offered

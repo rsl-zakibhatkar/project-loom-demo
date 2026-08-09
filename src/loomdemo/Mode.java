@@ -1,9 +1,18 @@
 package loomdemo;
 
-/** The two sides of the talk. Every demo in the app is either one or the other. */
+/**
+ * The two sides of the talk. Every demo in the app is either one or the other.
+ *
+ * <p>The constant is {@code FUTURE} but the label says "present", and that is deliberate.
+ * Virtual threads went final in Java 21 in September 2023 — calling them the future on
+ * stage would make them sound like something to wait for rather than something the room
+ * could have shipped two years ago. The constant, the {@code future} style class and the
+ * {@code -future-*} colour variables are internal identity and are left alone; renaming
+ * them across the CSS would be churn with no audience benefit.
+ */
 public enum Mode {
     PAST("Take me to the past", "Platform threads, bounded pools", "past", "#FFAB40"),
-    FUTURE("Take me to the future", "Virtual threads", "future", "#0097A7");
+    FUTURE("Take me to the present", "Virtual threads, since Java 21", "future", "#0097A7");
 
     private final String label;
     private final String subtitle;
