@@ -16,6 +16,7 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
+import javafx.stage.Screen;
 import javafx.stage.Stage;
 import loomdemo.ui.PerfCompareTab;
 import loomdemo.ui.Scoreboard;
@@ -57,7 +58,13 @@ public class Main extends Application {
         root.setTop(buildTopBar(theme, scoreboard));
         root.setCenter(tabPane);
 
-        Scene scene = new Scene(root, 1500, 960);
+        // Use whatever the projector actually gives us — presentation mode is 30% larger
+        // and the comparison tab needs the height.
+        var visual = Screen.getPrimary().getVisualBounds();
+        double width = Math.min(1500, visual.getWidth() * 0.94);
+        double height = Math.min(1040, visual.getHeight() * 0.94);
+
+        Scene scene = new Scene(root, width, height);
         scene.getStylesheets().add(Main.class.getResource("app.css").toExternalForm());
         installShortcuts(scene, theme);
 

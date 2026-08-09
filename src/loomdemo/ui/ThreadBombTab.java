@@ -5,9 +5,8 @@ import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.SplitPane;
-import javafx.scene.control.ToggleButton;
-import javafx.scene.control.ToggleGroup;
 import javafx.scene.control.Tooltip;
+import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -38,8 +37,7 @@ public final class ThreadBombTab implements DemoTab {
     private final ChildJvmRunner runner = new ChildJvmRunner();
     private final Scoreboard scoreboard;
 
-    private final ToggleButton pastButton = modeButton(Mode.PAST);
-    private final ToggleButton futureButton = modeButton(Mode.FUTURE);
+    private final ModeToggle modeToggle = new ModeToggle();
     private final Button runButton = new Button("▶  Run");
     private final Button stopButton = new Button("Stop");
     private final Label dirtyBadge = new Label("edited");
@@ -47,7 +45,6 @@ public final class ThreadBombTab implements DemoTab {
     private final VBox node;
 
     private Mode mode = Mode.PAST;
-    private boolean suppressToggle;
     private boolean punchlineShown;
 
     public ThreadBombTab(Scoreboard scoreboard) {
@@ -71,39 +68,17 @@ public final class ThreadBombTab implements DemoTab {
 
     // ------------------------------------------------------------------ controls
 
-    private HBox buildControls() {
-        ToggleGroup group = new ToggleGroup();
-        pastButton.setToggleGroup(group);
-        futureButton.setToggleGroup(group);
-        pastButton.setSelected(true);
-
-        // A ToggleGroup flips selection before we get a say, so when there are unsaved
-        // edits we put the selection back and ask first.
-        group.selectedToggleProperty().addListener((obs, was, is) -> {
-            if (suppressToggle) {
-                return;
-            }
-            if (is == null) {
-                suppressToggle = true;
-                group.selectToggle(was);
-                suppressToggle = false;
-                return;
-            }
-            Mode requested = is == pastButton ? Mode.PAST : Mode.FUTURE;
-            if (requested == mode) {
-                return;
-            }
+    private FlowPane buildControls() {
+        // Switching modes replaces the editor contents, so ask first if they have been
+        // touched. Returning false leaves the toggle showing the current mode.
+        modeToggle.setGuard(requested -> {
             if (editor.isDirty()) {
-                selectToggleFor(mode);
                 showConfirm(requested);
-            } else {
-                switchTo(requested);
+                return false;
             }
+            return true;
         });
-
-        HBox toggle = new HBox(pastButton, futureButton);
-        toggle.getStyleClass().add("mode-toggle");
-        toggle.setAlignment(Pos.CENTER_LEFT);
+        modeToggle.modeProperty().addListener((obs, was, is) -> switchTo(is));
 
         runButton.getStyleClass().addAll("run-button", mode.styleClass());
         runButton.setOnAction(e -> runDemo());
@@ -117,18 +92,17 @@ public final class ThreadBombTab implements DemoTab {
                 "Runs in a child JVM, never in this app — that is why the bomb can go off "
                         + "without taking the window with it.");
         caption.getStyleClass().add("caption");
+        caption.setWrapText(true);
         caption.setMaxWidth(460);
 
-        HBox bar = new HBox(12, toggle, runButton, stopButton, spacer(), caption);
+        runButton.setMinWidth(Region.USE_PREF_SIZE);
+        stopButton.setMinWidth(Region.USE_PREF_SIZE);
+
+        // FlowPane rather than HBox: at 130% presentation fonts these controls no longer
+        // fit on one line, and wrapping beats truncating "Take me to the past" to "...".
+        FlowPane bar = new FlowPane(12, 8, modeToggle.getNode(), runButton, stopButton, caption);
         bar.setAlignment(Pos.CENTER_LEFT);
         return bar;
-    }
-
-    private static ToggleButton modeButton(Mode mode) {
-        ToggleButton button = new ToggleButton(mode.label());
-        button.getStyleClass().addAll("mode-button", mode.styleClass());
-        button.setTooltip(new Tooltip(mode.subtitle()));
-        return button;
     }
 
     private VBox buildEditorFrame() {
@@ -197,7 +171,7 @@ public final class ThreadBombTab implements DemoTab {
                 + "\" will replace it.");
         discard.setOnAction(e -> {
             hideConfirm();
-            switchTo(requested);
+            modeToggle.setMode(requested);   // fires the listener, which swaps the source
         });
         confirmBar.setVisible(true);
         confirmBar.setManaged(true);
@@ -208,16 +182,8 @@ public final class ThreadBombTab implements DemoTab {
         confirmBar.setManaged(false);
     }
 
-    private void selectToggleFor(Mode target) {
-        suppressToggle = true;
-        pastButton.setSelected(target == Mode.PAST);
-        futureButton.setSelected(target == Mode.FUTURE);
-        suppressToggle = false;
-    }
-
     private void switchTo(Mode target) {
         mode = target;
-        selectToggleFor(target);
         editor.loadSource(DemoSources.forMode(target));
         console.clearPunchline();
         updateModeStyling();
@@ -303,8 +269,7 @@ public final class ThreadBombTab implements DemoTab {
     private void setRunning(boolean running) {
         runButton.setDisable(running);
         stopButton.setDisable(!running);
-        pastButton.setDisable(running);
-        futureButton.setDisable(running);
+        modeToggle.setDisable(running);
         editor.setEditable(!running);
     }
 
