@@ -9,7 +9,8 @@ threads. Three demos, switchable via tabs:
 
 Demo 2 carries a past/present toggle; demo 3 carries all three eras:
 
-- **Take me to the past** — platform threads, bounded pools · orange `#FFAB40`
+- **Take me to the past** — platform threads: one per task on demo 2, a pool of 200 on
+  demo 3 · orange `#FFAB40`
 - **Take me to the workaround** — async callbacks, one thread per core · violet `#7E57C2`
 - **Take me to the present** — virtual threads, since Java 21 · teal `#0097A7`
 
@@ -136,23 +137,41 @@ is editable: change `i < 5` to `i < 20` and re-run if you want a longer interlea
 
 ### Demo 2 — Thread Bomb
 
+**This is one program, run twice.** Both modes ask for a million threads, each sleeping one
+second, and count how many they actually get. The two sources differ by a single word on a
+single line, and they run under identical JVM flags. Say that out loud before you press
+anything — it is what stops the demo looking arranged.
+
 1. **Thread Bomb** tab. Toggle is on **Take me to the past**.
-2. Talk over the code on the left. It is real, runnable, and editable — change the sleep
-   duration or the print interval live if you want.
-3. **Run** (`⌘R`). The console streams the thread count climbing.
+2. Talk over the code on the left. Point at the marked line — `Thread.ofPlatform()` — and
+   say it is the only thing that will change. The code is real, runnable and editable.
+3. **Run** (`⌘R`). The console streams `alive: 100 … 2,000` climbing.
 4. It dies in well under a second. The punchline lands in huge orange type:
-   **`Died at thread #2,021`**
-5. Switch to **Take me to the present**. The editor swaps to the virtual-thread version.
+   **`Died at thread #2,021 of 1,000,000`**
+5. Switch to **Take me to the present**. The editor swaps — invite the room to spot the
+   difference before you say it. It is `ofPlatform` → `ofVirtual`, and nothing else.
    (If you edited the code, you get an inline prompt before it is discarded.)
-6. **Run**. Watch it climb through a million, then:
-   **`Completed 1,000,000 tasks in ~4.9s`**
-7. The scoreboard at the top now reads `PAST died at #2,021 | PRESENT 1,000,000 ✓`. It
-   stays there for the rest of the talk, including when you switch tabs.
+6. **Run**. Same climb, four orders of magnitude further, then a pause on
+   `All 1,000,000 threads are alive. Waiting for them...` while the counter drains:
+   **`Completed 1,000,000 tasks in ~5.5s`**
+7. The scoreboard at the top now reads
+   `PAST died at #2,021 | PRESENT 1,000,000 ✓ in 5.56s`. It stays there for the rest of the
+   talk, including when you switch tabs.
+
+**Both runs print the same command line** — `$ java -Xmx2g -Xss1m Demo.java` — at the top of
+the console. Scroll up and show it if anyone suspects the flags did the work. `-Xss1m` is
+the platform thread's 1 MB stack; virtual threads simply ignore it, which is the point.
 
 **Numbers to expect.** The death point is whatever your machine's thread limit allows —
-around 2,000 on an M2 (`kern.num_taskthreads` is 2048), higher on machines with a larger
-limit. It varies per machine and that is fine; the gap to 1,000,000 is the point. Check
-yours during the warm-up run so you can quote it confidently.
+2,019–2,021 across thirteen runs on an M2 (`kern.num_taskthreads` is 2048), higher on
+machines with a larger limit. It varies per machine and that is fine; the gap to 1,000,000
+is the point. Check yours during the warm-up run so you can quote it confidently.
+
+The past side reaches the limit in about 90 ms, well inside the one-second sleep, so no
+thread has retired yet and death is certain. On a machine with a *much* higher thread limit
+— tens of thousands — creation could get slow enough that early threads start finishing and
+the program survives longer than you want. It has not happened on any Mac tested, but if
+your warm-up run does not die, raise the sleep in the editor and it will.
 
 ### Demo 3 — Performance Comparison
 
@@ -206,6 +225,8 @@ comparison is invalid. Re-run one side to match.
 | Two Cooks produced the same order twice | Say so — it is genuinely random, not guaranteed to differ. Run it once more. Two identical runs followed by a different one makes the point better than a lecture would. |
 | The workaround beat virtual threads | Expected, and fine. They are the same number and the run-to-run spread is wider than the gap. Say "same speed" and move to the handlers — that is where the argument actually is. |
 | Thread bomb dies at a surprising number | Say the number out loud and move on. It is machine-specific and the contrast is unaffected. |
+| The thread bomb does not die at all | Only possible on a machine whose thread limit is high enough that creation outruns the one-second sleep. Change `Duration.ofSeconds(1)` to `ofMinutes(1)` in the editor and run again — the past side dies for certain, and you simply stop before running the present side, which would now never finish. |
+| Someone says the two programs are different | Scroll the console to the `$ java …` line: it is identical in both runs. Then put the two sources side by side — one word, one line. That is the whole answer. |
 | Errors appear on a stats panel | Hover the errors figure for the actual failure kinds. Most likely something else on the machine is holding ports or CPU. Press Stop, then Run again. |
 | The code got edited into something broken | **Reset** button above the editor restores the original source for that mode or snippet. If you run it broken first, the real `javac` error appears in the console — which is a fine thing to show on purpose. |
 | An unexpected error | It goes to the output console, not a crash dialog. The window will not go down with the demo — that is the whole reason the thread bomb runs in a child JVM. |
@@ -220,7 +241,7 @@ comparison is invalid. Re-run one side to match.
 The past-mode program deliberately exhausts the OS thread limit. Running it in the app's
 own process would take the window down with it. Instead the editor's contents are written
 to a temp file and executed by a child process using single-file source execution
-(`java Demo.java`), with `-Xmx512m -Xss1m` for past and `-Xmx2g` for present. Its stdout
+(`java Demo.java`), under `-Xmx2g -Xss1m` — **the same flags in both modes**. Its stdout
 and stderr are merged and streamed back into the console at about 30 Hz.
 
 The child JVM is the runtime bundled inside the `.app`, so nothing needs to be installed
@@ -228,9 +249,32 @@ on the presenting machine. That runtime is jlinked **with `jdk.compiler` and `jd
 which the source launcher silently requires — `make verify` exists to catch that before it
 becomes a problem on stage.
 
-Two output lines are load-bearing: `Died at thread #N` and `Completed 1,000,000 tasks in
-Xs`. The app watches for those and promotes them to the punchline banner and the
+Two output lines are load-bearing: `Died at thread #N of M` and `Completed 1,000,000 tasks
+in Xs`. The app watches for those and promotes them to the punchline banner and the
 scoreboard. Edit them live and the demo still runs, you just lose the banner.
+
+### Demo 2's two programs are the same program
+
+`DemoSources` holds **one** template. The two modes are that template with `$FACTORY$`
+replaced by `ofPlatform` or `ofVirtual`, so they cannot drift apart — not the comments, not
+the prints, not the flags. It would take an edit to the template to make anything else
+differ, which is exactly the property the demo is claiming.
+
+That constrains the code in two ways worth knowing before you edit it:
+
+- **The progress print is one shared rule** — chatty below ten thousand, every hundred
+  thousand above it. Past gets its twenty lines of climb; present gets a fast blur and then
+  ten `completed:` lines while it drains. Neither side gets a print tuned for itself.
+- **`executor.close()` is called explicitly, not by try-with-resources.** With
+  try-with-resources, the `OutOfMemoryError` would unwind *through* `close()`, which waits
+  out two thousand one-second sleeps — the death message would arrive a second late, after
+  a visible stall. Calling `close()` inside the `try` lets the `catch` reach `System.exit`
+  while the corpses are still warm.
+
+The past side's OOM arrives raw and unwrapped out of `executor.submit()` on the main
+thread, so the console shows the real
+`java.lang.OutOfMemoryError: unable to create native thread` text rather than something the
+demo made up. The two `[warning][os,thread]` lines above it are the JVM's own, on stderr.
 
 ### Threads 101 compiles ahead of time so re-runs are instant
 

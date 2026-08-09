@@ -25,10 +25,18 @@ import java.util.regex.Pattern;
  */
 public final class ThreadBombTab implements DemoTab {
 
-    private static final List<String> PAST_FLAGS = List.of("-Xmx512m", "-Xss1m");
-    private static final List<String> FUTURE_FLAGS = List.of("-Xmx2g");
+    /**
+     * The same flags in both modes, so the {@code $ java …} line the console prints is
+     * byte-identical across the two runs — the demo's claim is that only one word of the
+     * program changed, and a different command line would undercut it. The past side still
+     * dies on the OS thread limit rather than on heap, so the larger heap costs it
+     * nothing, and {@code -Xss1m} is simply ignored by virtual threads, which is a point
+     * worth making out loud.
+     */
+    private static final List<String> FLAGS = List.of("-Xmx2g", "-Xss1m");
 
-    private static final Pattern DIED = Pattern.compile("Died at thread #([\\d,_]+)");
+    private static final Pattern DIED =
+            Pattern.compile("Died at thread #([\\d,_]+) of ([\\d,_]+)");
     private static final Pattern COMPLETED =
             Pattern.compile("Completed ([\\d,_]+) tasks in ([\\d.]+)s");
 
@@ -204,13 +212,12 @@ public final class ThreadBombTab implements DemoTab {
         punchlineShown = false;
         console.clear();
 
-        List<String> flags = mode == Mode.PAST ? PAST_FLAGS : FUTURE_FLAGS;
-        console.appendLine("$ java " + String.join(" ", flags) + " Demo.java");
+        console.appendLine("$ java " + String.join(" ", FLAGS) + " Demo.java");
         console.appendLine("  (child JVM: " + ChildJvmRunner.javaBinary() + ")");
         console.appendLine("");
 
         setRunning(true);
-        runner.start(editor.getSource(), flags, new ChildJvmRunner.Listener() {
+        runner.start(editor.getSource(), FLAGS, new ChildJvmRunner.Listener() {
             @Override
             public void onLines(List<String> lines) {
                 console.appendLines(lines);
@@ -248,7 +255,12 @@ public final class ThreadBombTab implements DemoTab {
         for (String line : lines) {
             Matcher died = DIED.matcher(line);
             if (died.find()) {
-                console.setPunchline("Died at thread #" + died.group(1), Mode.PAST);
+                // The denominator belongs on the banner — it is what makes this number
+                // read against the present side's million instead of floating alone. The
+                // scoreboard chip stays short; it sits in the title bar beside a chip that
+                // already says a million.
+                console.setPunchline("Died at thread #" + died.group(1)
+                        + " of " + died.group(2), Mode.PAST);
                 scoreboard.setResult(Mode.PAST, "died at #" + died.group(1));
                 punchlineShown = true;
                 return;

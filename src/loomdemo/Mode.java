@@ -11,7 +11,7 @@ package loomdemo;
  * them across the CSS would be churn with no audience benefit.
  */
 public enum Mode {
-    PAST("Take me to the past", "Platform threads, bounded pools", "past", "#FFAB40"),
+    PAST("Take me to the past", "Platform threads, one per task", "past", "#FFAB40"),
     FUTURE("Take me to the present", "Virtual threads, since Java 21", "future", "#0097A7");
 
     private final String label;

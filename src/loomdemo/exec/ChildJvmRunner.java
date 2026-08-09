@@ -70,7 +70,7 @@ public final class ChildJvmRunner {
     /**
      * Compile-and-run {@code source} in a child JVM.
      *
-     * @param jvmArgs flags placed before the source file, e.g. {@code -Xmx512m -Xss1m}
+     * @param jvmArgs flags placed before the source file, e.g. {@code -Xmx2g -Xss1m}
      */
     public void start(String source, List<String> jvmArgs, Listener listener) {
         if (isRunning()) {
