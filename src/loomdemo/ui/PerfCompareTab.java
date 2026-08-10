@@ -329,12 +329,17 @@ public final class PerfCompareTab implements DemoTab {
 
     private HBox buildCaptions() {
         Label serverNote = new Label(
-                "Each handler is one Thread.sleep(), standing in for a database call.");
+                "Each request calls three dummy services in turn — findUser, findOrder, "
+                        + "chargeCard.");
         serverNote.getStyleClass().add("caption");
         serverNote.setTooltip(new Tooltip(
-                "The handlers are identical in both modes. The only thing that changes is the "
-                        + "executor the server runs them on: a fixed pool of 200 platform "
-                        + "threads, or one virtual thread per request."));
+                "The services do nothing but wait, and they split the endpoint's latency "
+                        + "rather than adding to it — a 100ms endpoint still takes 100ms.\n"
+                        + "Each call needs the answer from the one before it, which is what "
+                        + "the async handler has to work around.\n"
+                        + "The handlers are identical in past and present. The only thing "
+                        + "that changes is the executor the server runs them on: a fixed "
+                        + "pool of 200 platform threads, or one virtual thread per request."));
 
         Label clientNote = new Label("Client always uses virtual threads ⓘ");
         clientNote.getStyleClass().add("caption");
@@ -645,13 +650,17 @@ public final class PerfCompareTab implements DemoTab {
         boolean showWorkaround = workaround != null && present != null;
         show(workaroundLine, showWorkaround);
         if (showWorkaround) {
-            int asyncLines = OrderServer.handlerLineCount(Era.WORKAROUND);
-            int blockingLines = OrderServer.handlerLineCount(Era.PRESENT);
+            // Callbacks, not lines. Once both handlers share respond(), the async one is
+            // actually the SHORTER of the two — so a line count would now argue the wrong
+            // way, and propping it up would mean billing async for boilerplate blocking
+            // needs too. What survives the fair comparison is the control flow.
+            int asyncCallbacks = OrderServer.handlerCallbackCount(Era.WORKAROUND);
+            int blockingCallbacks = OrderServer.handlerCallbackCount(Era.PRESENT);
             workaroundLine.setText(String.format(Locale.US,
                     "Async got there too — %,.0f req/s on %d threads, against %,.0f. "
-                            + "It cost %d lines of handler instead of %d.",
+                            + "It cost %d callbacks instead of %d, two of them nested.",
                     workaround.throughput(), Era.asyncThreads(), present.throughput(),
-                    asyncLines, blockingLines));
+                    asyncCallbacks, blockingCallbacks));
         }
     }
 

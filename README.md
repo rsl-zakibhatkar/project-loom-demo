@@ -196,16 +196,24 @@ your warm-up run does not die, raise the sleep in the editor and it will.
    - Say the quiet part: *they are right*. Async really does solve this.
 6. Press **Show the handlers**. The chart is replaced by the handler each era actually
    runs, and the era buttons now flip the code instead of the run.
-   - Past and present share one handler, byte for byte: **18 lines**, one `Thread.sleep`,
-     one `try/finally`, and a stack trace that names your own method when it breaks.
-   - The workaround needs **25 lines**, a `CompletableFuture` chain, a second method to
-     write the response, and a `catch` block with nowhere to throw to.
-   - **`That is the whole talk.`** Same throughput. One of them is code you can debug.
+   - Say what the services are before anything else: `findUser`, `findOrder`, `chargeCard`,
+     three dummies that do nothing but wait. Nobody needs to care what they do. What matters
+     is that each one needs the answer from the one before it — every controller in the room
+     looks like this.
+   - Past and present share one handler, byte for byte. Three calls, three lines, in order.
+     Read them out; they read as English.
+   - The workaround does the same three calls with **5 callbacks**, two of them nested. Point
+     at the nesting and say why it is there: `chargeCard` needs *both* `user` and `order`,
+     and a `CompletableFuture` only carries the last value forward — so `user` is only
+     reachable from inside the outer lambda.
+   - **`That is the whole talk.`** Same throughput. One of them is code you can read.
 7. **Then prove the last sentence.** Press **Break it**. One request goes to an endpoint
    that always fails, through both handler shapes, and the two real stack traces come back
    side by side. No load test, no waiting.
-   - Both traces name `callPaymentGateway`. Say so first — you are not claiming async
-     loses your code.
+   - Both traces name `chargeCard` and `callPaymentGateway` — the same methods that were on
+     the handler slide a moment ago. Say so first; you are not claiming async loses your code.
+   - The blocking trace also names `boomHandler`, the handler itself. The async one does not,
+     and it has no sign of `findUser` or `findOrder` either — they ran on other threads.
    - The blocking trace also carries the request: `Filter.doFilter`, `Exchange.run`,
      six frames of it, in the era's own colour. The async trace has **none** — it runs
      `AsyncSupply.run` → `runWorker` → `Thread.run` and stops. Nothing is abbreviated; that
@@ -252,8 +260,9 @@ comparison is invalid. Re-run one side to match.
 | Thread bomb dies at a surprising number | Say the number out loud and move on. It is machine-specific and the contrast is unaffected. |
 | The thread bomb does not die at all | Only possible on a machine whose thread limit is high enough that creation outruns the one-second sleep. Change `Duration.ofSeconds(1)` to `ofMinutes(1)` in the editor and run again — the past side dies for certain, and you simply stop before running the present side, which would now never finish. |
 | Break it shows an error in a panel | It could not reach the server. Press **Show the chart** and then **Break it** again — it rebinds the server each time, so a second attempt is a fresh start. The error stays inside the panel and takes nothing else down. |
-| Someone says async keeps the stack trace | Agree, and show them: the `Caused by:` section is right there with all three frames. Then read the counts out loud — the request path is 6 against 0, and `getCause()` does not bring it back. |
-| Someone asks what was lost, if all the frames are there | The async panel is longer and says less. Everything your stage called synchronously survives; everything that called *it* is gone. Blocking reads as one story from failure to entry point; async starts at a pool worker. |
+| Someone says async keeps the stack trace | Agree, and show them: the `Caused by:` section is right there, naming `chargeCard` and `callPaymentGateway`. Then read the counts out loud — the request path is 6 against 0, and `getCause()` does not bring it back. |
+| Someone asks what was lost, if all the frames are there | Point at the three names on the handler slide, then at the async trace. `boomHandler` is missing, and so are `findUser` and `findOrder` — they ran for this request, on other threads. Everything a stage called synchronously survives; everything that called *it* is gone. |
+| Someone says you would use a record, not nested lambdas | Agree — the comment under the async handler already says so. That is the trade: two nested lambdas, or a type your domain never asked for, threaded through every stage. The blocking version needs neither. |
 | Someone says the two programs are different | Scroll the console to the `$ java …` line: it is identical in both runs. Then put the two sources side by side — one word, one line. That is the whole answer. |
 | Errors appear on a stats panel | Hover the errors figure for the actual failure kinds. Most likely something else on the machine is holding ports or CPU. Press Stop, then Run again. |
 | The code got edited into something broken | **Reset** button above the editor restores the original source for that mode or snippet. If you run it broken first, the real `javac` error appears in the console — which is a fine thing to show on purpose. |
@@ -370,17 +379,17 @@ The obvious version of this exhibit counts frames belonging to the app and shows
 `.exceptionally(failure -> …)` receives a `CompletionException`. Its *own* stack trace is
 pure `CompletableFuture` machinery — but it wraps the original `IllegalStateException`,
 which was constructed inside `callPaymentGateway`, so a `Caused by:` section carries all
-three of the app's frames. "3 against 0" is only true if the panel hides that section, and
-someone who says *"just call `getCause()`"* would be right.
+the app's frames from inside that stage. "3 against 0" is only true if the panel hides that
+section, and someone who says *"just call `getCause()`"* would be right.
 
 So the panel shows the whole trace, cause included, and counts something that is genuinely
 zero on one side: frames naming the HTTP server's request path. Measured on this JDK:
 
 | | total frames | app | request path |
 | --- | --- | --- | --- |
-| past, blocking | 12 | 3 | **6** |
-| workaround, async | 14 | 3 (under `Caused by:`) | **0** |
-| present, blocking | 11 | 3 | **6** |
+| past, blocking | 12 | 3 — incl. the handler | **6** |
+| workaround, async | 13 | 2 (under `Caused by:`), no handler | **0** |
+| present, blocking | 11 | 3 — incl. the handler | **6** |
 
 Both traces name the payment gateway. Only one says a request was involved — and no amount
 of unwrapping puts it back, because it was never on that stack. That is exactly the claim
@@ -398,22 +407,31 @@ blocking trace, so what is the problem? The honest answer is that **everything a
 synchronously stays on its stack, and everything below the stage boundary does not.** The
 async trace is not missing your code. It is missing the context in which your code ran.
 
-The tab's version is the mildest possible case: the failure is in the *first* stage, so the
-only thing under the boundary is the server itself — six request frames. A realistic
-pipeline loses more, because every `thenApply` / `thenCompose` is another cut. Measured, the
-same four steps written both ways, failing in the last one:
+The failure is deliberately in the **third** service, not the first, and the two traces show
+exactly what that costs. Read them bottom-up:
+
+| | reads as |
+| --- | --- |
+| blocking | `Thread.run ← Exchange.run ← doFilter ← boomHandler ← chargeCard ← callPaymentGateway` |
+| async | `Thread.run ← runWorker ← AsyncSupply.run ← chargeCard ← callPaymentGateway` |
+
+The blocking trace is one continuous story: a request arrived, went through the filter chain,
+reached your handler, which charged a card, which called the gateway. The async trace starts
+at a pool worker. `boomHandler` is not on it — and neither are `findUser` or `findOrder`,
+which really did run for this request, on two other threads, moments earlier. They are not
+abbreviated. They are *absent*.
+
+Every `thenApply` / `thenCompose` is another cut, so a deeper pipeline loses more. Measured,
+the same four steps written both ways, failing in the last:
 
 | | frames from your code | what they tell you |
 | --- | --- | --- |
 | nested calls, blocking | 5 | `callGateway ← chargeCard ← reserveStock ← checkout ← main` |
 | composed stages, async | 3 | `callGateway ← chargeCard ← reserveStock ← ` a pool worker |
 
-`checkout` and `main` are gone — not abbreviated, *absent*. They were never on that thread.
-The trace tells you the gateway call failed inside `reserveStock`; it cannot tell you that
-`reserveStock` was reached from a checkout, because it wasn't — it was reached from
-`ThreadPoolExecutor.runWorker`. In the blocking version the trace is one continuous story
-from the failure down to the entry point. In the async version it is a fragment of a story,
-starting wherever the current stage happened to begin.
+`checkout` and `main` are gone the same way. The trace tells you the gateway call failed
+inside `reserveStock`; it cannot tell you that `reserveStock` was reached from a checkout,
+because it wasn't — it was reached from `ThreadPoolExecutor.runWorker`.
 
 Two shapes make it worse still, and are worth mentioning if someone pushes: a future
 completed from an I/O callback via `completeExceptionally` carries the stack of *whatever
@@ -469,7 +487,7 @@ at once on 8 threads**, zero errors.
 runs: past 1,700–1,900 req/s, workaround 10,600–14,900, present 11,700–12,800. The
 workaround won three of four — inside the run-to-run spread, which is wider on the async
 side than the virtual-thread side. Async is not more throughput; it is the same throughput,
-noisier, for 25 lines of handler against 18.
+noisier, for 5 callbacks against 0.
 
 That tie is the entire reason the era is in the app. A comparison that only showed past
 against present would lose to the first person who says "I'd use CompletableFuture" —
@@ -477,9 +495,50 @@ because they would be right. Showing that they are right, and then showing the t
 handlers, is a much stronger position than never raising it.
 
 **The handler sources on screen are extracts**, held as constants next to the methods they
-mirror in `OrderServer.java`. Edit one, edit the other. The line counts under the panels
-ignore blanks and comments, so the async version is not being penalised for explaining
-itself.
+mirror in `OrderServer.java`. Edit one, edit the other — the `Eras` harness asserts that all
+three service calls appear in both. The counts under the panels ignore blanks and comments,
+so the async version is not penalised for explaining itself.
+
+### Why the panel counts callbacks and not lines
+
+It used to say *"25 lines of handler against 18"*. That number was quietly measuring the
+wrong thing.
+
+The old blocking handler was 18 lines of which **one** was business logic — the other 17
+were `com.sun.net.httpserver` plumbing (`sendResponseHeaders`, `getResponseBody`,
+`exchange.close()`), an API nobody in a Spring room has ever written. So the slide asked the
+audience to decode an unfamiliar 2006 HTTP API to reach a point that was one line deep, and
+a good chunk of the 7-line gap was just *"async also has to write the response"* — true, but
+small, and arguable, and doing most of the work in the headline.
+
+Both handlers now share `respond(...)`, because both need a response written and neither
+should be billed for it. With that fixed, the async handler comes out at **9 lines against
+blocking's 12** — *shorter*. Propping the old figure up would have meant leaving boilerplate
+on the async side purely to keep the number, which is the same rigged-evidence problem
+removed from Demo 2 and from the Break it counter.
+
+What survives the fair comparison is control flow, so that is what gets counted:
+
+| | lines | callbacks | reads in order |
+| --- | --- | --- | --- |
+| past / present, blocking | 12 | **0** | yes |
+| workaround, async | 9 | **5** | no — two nested |
+
+`handlerCallbackCount` counts `->` on comment-free lines and subtracts the handler's own, so
+the number on the panel is derived from the exact string the audience is looking at and
+cannot drift from it.
+
+### The three services split the latency, they do not add to it
+
+`Timings.split` shares each endpoint's advertised budget 40/35/25, remainder to the last
+slice so it sums exactly: 100 ms becomes 40/35/25, 300 becomes 120/105/75, 20 becomes 8/7/5.
+Per-request wall time is unchanged, which is why every throughput number in this file still
+holds after the rewrite. Uneven on purpose — three equal waits look like a loop, and the
+point is three different calls.
+
+The services sleep and return a record. Nothing else. `OrderService.pause` restores the
+interrupt flag before rethrowing unchecked, so the handler needs one `catch` rather than two
+and the executor can still interrupt its workers on `stop()`.
 
 Each run has an untimed warm-up that opens one pooled connection per unit of concurrency,
 then the timed run. The warm-up is not cosmetic: without it, the measured phase opens

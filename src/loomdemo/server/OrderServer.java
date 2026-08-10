@@ -21,9 +21,13 @@ import java.util.concurrent.TimeUnit;
 /**
  * A tiny order service, embedded in the app, that exists to be slow in an honest way.
  *
- * <p>Every endpoint does exactly one thing: wait out its latency, then return JSON. The
- * wait stands in for a database call — that is the whole point. What changes between eras
- * is how the server survives that wait:
+ * <p>Every endpoint calls three services that do nothing but wait — {@code findUser},
+ * {@code findOrder}, {@code chargeCard} — and then returns JSON. The waits stand in for
+ * database and gateway calls, and they <em>split</em> the endpoint's advertised latency
+ * rather than adding to it, so a 100&nbsp;ms endpoint still takes 100&nbsp;ms. Three calls
+ * rather than one because the third needs results from the first two, and a chain of
+ * dependent calls is the shape every controller in the room actually has. What changes
+ * between eras is how the server survives the waiting:
  *
  * <ul>
  *   <li>{@link Era#PAST} — {@code newFixedThreadPool(200)}, blocking handler: 200 requests
@@ -215,60 +219,38 @@ public final class OrderServer {
     public static final String BLOCKING_HANDLER_SOURCE = """
             exchange -> {
                 try {
-                    // The one line that matters: a blocking call for the database.
-                    Thread.sleep(latencyMillis);
+                    User user = service.findUser(idFrom(exchange));      // blocks
+                    Order order = service.findOrder(user);               // blocks
+                    Receipt receipt = service.chargeCard(user, order);   // blocks
 
-                    byte[] body = json(exchange, latencyMillis);
-                    exchange.getResponseHeaders().set("Content-Type", "application/json");
-                    exchange.sendResponseHeaders(200, body.length);
-                    try (OutputStream out = exchange.getResponseBody()) {
-                        out.write(body);
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    quietly(exchange, 503);
-                } catch (Throwable t) {
-                    quietly(exchange, 500);
+                    respond(exchange, 200, json(receipt));
+                } catch (Exception failure) {
+                    respond(exchange, 500, null);
                 } finally {
                     exchange.close();
                 }
             }
             """;
 
-    /** WORKAROUND runs this. Same server, same endpoint, same simulated database. */
+    /** WORKAROUND runs this. Same three services, same order, same total wait. */
     public static final String ASYNC_HANDLER_SOURCE = """
-            exchange -> CompletableFuture
-                    .supplyAsync(
-                            () -> json(exchange, latencyMillis),   // the database call
-                            CompletableFuture.delayedExecutor(
-                                    latencyMillis, MILLISECONDS, eventLoop))
-                    .thenAccept(body -> respond(exchange, 200, body))
+            exchange -> service.findUser(idFrom(exchange))
+                    .thenCompose(user -> service.findOrder(user)
+                            .thenCompose(order -> service.chargeCard(user, order)))
+                    .thenAccept(receipt -> respond(exchange, 200, json(receipt)))
                     .exceptionally(failure -> {
-                        respond(exchange, 500, null);
+                        respond(exchange, 500, null);   // nowhere to throw to
                         return null;
                     })
                     .whenComplete((ignored, failure) -> exchange.close());
 
-            // ...plus the response write, which the blocking version got for free
-            // from try-with-resources:
-
-            static void respond(HttpExchange exchange, int status, byte[] body) {
-                try {
-                    if (body == null) {
-                        exchange.sendResponseHeaders(status, -1);
-                        return;
-                    }
-                    exchange.getResponseHeaders().set("Content-Type", "application/json");
-                    exchange.sendResponseHeaders(status, body.length);
-                    try (OutputStream out = exchange.getResponseBody()) {
-                        out.write(body);
-                    }
-                } catch (IOException e) {
-                    // Nowhere to throw to. There is no caller left on this stack, and
-                    // the stack trace you would get names a pool worker, not the
-                    // request that failed.
-                }
-            }
+            // The nesting is not a strawman. chargeCard needs BOTH user and order, and a
+            // CompletableFuture only carries the last value forward — so `user` is only
+            // reachable from inside the outer lambda.
+            //
+            // You can flatten it: declare a record whose only job is to carry `user` and
+            // `order` across the thread hop, and thread it through every stage. That is the
+            // trade — two nested lambdas, or a type your domain never asked for.
             """;
 
     public static String handlerSourceFor(Era era) {
@@ -289,23 +271,39 @@ public final class OrderServer {
                 .count();
     }
 
+    /**
+     * Callbacks the handler has to hand to somebody else, not counting the handler itself.
+     *
+     * <p>This replaced a line count as the tab's headline, because a line count stopped being
+     * true. Once both handlers share {@link #respond}, as they should — the blocking one needs
+     * a response written just as much as the async one does — the async version comes out
+     * <em>shorter</em>. Keeping the boilerplate on the async side to preserve the old figure
+     * would have been rigging the comparison.
+     *
+     * <p>What actually differs survives the fair version: blocking hands out <strong>none</strong>,
+     * async hands out <strong>five</strong>, two of them nested inside each other. Counted off
+     * the same string the audience is looking at, from comment-free lines only, so the number
+     * on screen cannot drift from the code on screen.
+     */
+    public static int handlerCallbackCount(Era era) {
+        long arrows = handlerSourceFor(era).lines()
+                .filter(line -> !line.strip().startsWith("//"))
+                .mapToLong(line -> line.split("->", -1).length - 1)
+                .sum();
+        return (int) Math.max(0, arrows - 1);   // the handler's own "exchange ->" is not a callback
+    }
+
     private static HttpHandler handlerFor(int latencyMillis) {
+        OrderService service = new OrderService(Timings.split(latencyMillis));
         return exchange -> {
             try {
-                // The one line that matters: a blocking call standing in for the database.
-                Thread.sleep(latencyMillis);
+                User user = service.findUser(idFrom(exchange));      // blocks
+                Order order = service.findOrder(user);               // blocks
+                Receipt receipt = service.chargeCard(user, order);   // blocks
 
-                byte[] body = json(exchange, latencyMillis);
-                exchange.getResponseHeaders().set("Content-Type", "application/json");
-                exchange.sendResponseHeaders(200, body.length);
-                try (OutputStream out = exchange.getResponseBody()) {
-                    out.write(body);
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                quietly(exchange, 503);
-            } catch (Throwable t) {
-                quietly(exchange, 500);
+                respond(exchange, 200, json(receipt));
+            } catch (Exception failure) {
+                respond(exchange, 500, null);
             } finally {
                 exchange.close();
             }
@@ -323,13 +321,14 @@ public final class OrderServer {
      * what two hundred could not.
      */
     private static HttpHandler asyncHandlerFor(int latencyMillis, Executor eventLoop) {
-        return exchange -> CompletableFuture
-                .supplyAsync(() -> json(exchange, latencyMillis),
-                        CompletableFuture.delayedExecutor(
-                                latencyMillis, TimeUnit.MILLISECONDS, eventLoop))
-                .thenAccept(body -> respond(exchange, 200, body))
+        AsyncOrderService service =
+                new AsyncOrderService(Timings.split(latencyMillis), eventLoop);
+        return exchange -> service.findUser(idFrom(exchange))
+                .thenCompose(user -> service.findOrder(user)
+                        .thenCompose(order -> service.chargeCard(user, order)))
+                .thenAccept(receipt -> respond(exchange, 200, json(receipt)))
                 .exceptionally(failure -> {
-                    respond(exchange, 500, null);
+                    respond(exchange, 500, null);   // nowhere to throw to
                     return null;
                 })
                 .whenComplete((ignored, failure) -> exchange.close());
@@ -342,9 +341,10 @@ public final class OrderServer {
      * what you can read afterwards.
      *
      * Measured on this JDK (21.0.12): the blocking trace carries 12 frames, 3 of them ours
-     * and 6 of them the server's own request path — Filter$Chain.doFilter, AuthFilter,
-     * ServerImpl$Exchange.run. The async trace carries 14 and NONE of the request path: its
-     * cause bottoms out at AsyncSupply.run -> runWorker -> Thread.run, a pool worker.
+     * — including boomHandler itself — and 6 the server's own request path:
+     * Filter$Chain.doFilter, AuthFilter, ServerImpl$Exchange.run. The async trace carries 13,
+     * only 2 of them ours, no handler frame, and NONE of the request path: its cause bottoms
+     * out at AsyncSupply.run -> runWorker -> Thread.run, a pool worker.
      *
      * Note the async trace is the LONGER of the two and still says less. That is the shape
      * of the problem: what you lose is not frames, it is the caller chain.
@@ -353,14 +353,21 @@ public final class OrderServer {
      * and the tab shows that section rather than hiding it — "just call getCause()" is a
      * fair objection and the exhibit has to survive it. What getCause() cannot give back is
      * the request: it is not on that stack at all, at any depth.
+     *
+     * These run the SAME services as the ordinary handlers above, with the payment gateway
+     * turned off. The methods the room reads on the handler slide are the methods it then
+     * reads in the trace, rather than a second set invented for this button alone.
      */
 
     /** PAST and PRESENT share this one, exactly as they share {@link #handlerFor}. */
     private static HttpHandler boomHandler() {
+        OrderService service = new OrderService(Timings.split(BOOM_LATENCY_MILLIS), true);
         return exchange -> {
             try {
-                loadOrder(idFrom(exchange));
-                respond(exchange, 200, null);   // never reached
+                User user = service.findUser(idFrom(exchange));
+                Order order = service.findOrder(user);
+                service.chargeCard(user, order);            // throws
+                respond(exchange, 200, null);               // never reached
             } catch (Throwable failure) {
                 respondTrace(exchange, failure);
             } finally {
@@ -370,38 +377,27 @@ public final class OrderServer {
     }
 
     /**
-     * The workaround era's version. {@code loadOrder} is called <em>inside</em> the
-     * {@code supplyAsync} supplier, so it runs on the delayed executor and the thread hop
-     * has already happened when it throws. Failing any earlier — in the handler body, before
-     * the stage — would leave the handler's own frame on the stack and prove nothing.
+     * The workaround era's version, and now the honest one: the failure lands in the
+     * <em>third</em> stage, not the first.
+     *
+     * <p>That matters. Failing in the first stage leaves that stage's whole synchronous call
+     * chain intact and costs only the request path. Failing in the third loses the two
+     * earlier stages as well — {@code findUser} and {@code findOrder} ran on other threads
+     * and are nowhere on this stack. It is the same shape a real pipeline has, and a
+     * strictly better exhibit than the one-stage version it replaces.
      */
     private static HttpHandler asyncBoomHandler(Executor eventLoop) {
-        return exchange -> CompletableFuture
-                .supplyAsync(() -> loadOrder(idFrom(exchange)),
-                        CompletableFuture.delayedExecutor(
-                                BOOM_LATENCY_MILLIS, TimeUnit.MILLISECONDS, eventLoop))
-                .thenAccept(order -> respond(exchange, 200, null))
+        AsyncOrderService service = new AsyncOrderService(
+                Timings.split(BOOM_LATENCY_MILLIS), eventLoop, true);
+        return exchange -> service.findUser(idFrom(exchange))
+                .thenCompose(user -> service.findOrder(user)
+                        .thenCompose(order -> service.chargeCard(user, order)))
+                .thenAccept(receipt -> respond(exchange, 200, null))
                 .exceptionally(failure -> {
                     respondTrace(exchange, failure);
                     return null;
                 })
                 .whenComplete((ignored, failure) -> exchange.close());
-    }
-
-    /*
-     * Two methods rather than one, so the stage has a real call chain inside it. Both of
-     * them survive the async hop, and should — everything a stage calls synchronously stays
-     * on its stack. What does not survive is anything BELOW the stage boundary: the handler
-     * that submitted it, the filter chain, the exchange. A single throwing method would
-     * make the surviving side of that line too short to see.
-     */
-
-    private static String loadOrder(String id) {
-        return callPaymentGateway(id);
-    }
-
-    private static String callPaymentGateway(String id) {
-        throw new IllegalStateException("payment gateway timeout");
     }
 
     /** A cause chain deeper than this is a bug somewhere; stop rather than loop forever. */
@@ -457,7 +453,14 @@ public final class OrderServer {
         return "http://127.0.0.1:" + port + BOOM_PATH;
     }
 
-    /** The response write the blocking handler got for free from try-with-resources. */
+    /**
+     * The response write, shared by both handler shapes.
+     *
+     * <p>Shared deliberately. An earlier version left this inline in the blocking handler and
+     * charged the async one for having to extract it, which made the line-count comparison
+     * partly a comparison of who writes socket code. Both need a response written; neither
+     * should be billed for it. What is left on screen is the difference in control flow.
+     */
     private static void respond(HttpExchange exchange, int status, byte[] body) {
         respond(exchange, status, body, "application/json");
     }
@@ -479,19 +482,13 @@ public final class OrderServer {
         }
     }
 
-    private static byte[] json(HttpExchange exchange, int latencyMillis) {
-        String path = exchange.getRequestURI().getPath();
-        int slash = path.lastIndexOf('/');
-        String id = slash >= 0 && slash < path.length() - 1 ? path.substring(slash + 1) : "0";
-        return ("{\"orderId\":\"" + id + "\",\"status\":\"SHIPPED\",\"dbLatencyMs\":"
-                + latencyMillis + "}").getBytes(StandardCharsets.UTF_8);
-    }
-
-    private static void quietly(HttpExchange exchange, int status) {
-        try {
-            exchange.sendResponseHeaders(status, -1);
-        } catch (IOException ignored) {
-            // client is already gone
-        }
+    /**
+     * The response body. {@code LoadGenerator} discards it and only reads the status, so
+     * this exists to be the last line of the handler rather than to be parsed by anything.
+     */
+    private static byte[] json(Receipt receipt) {
+        return ("{\"orderId\":\"" + receipt.orderId() + "\",\"sentTo\":\""
+                + receipt.sentTo() + "\",\"status\":\"" + receipt.status() + "\"}")
+                .getBytes(StandardCharsets.UTF_8);
     }
 }

@@ -335,8 +335,18 @@
     -fx-border-width: 0 0 1 0;
 }
 
+/*
+ * Menlo first, and it matters.
+ *
+ * JavaFX does not walk a font-family list the way a browser does: it takes the first name,
+ * and if that name resolves to nothing it falls back to the default (proportional) font
+ * rather than trying the next one. "SF Mono" ships inside Terminal.app rather than as a
+ * system font, so Font.getFontNames("SF Mono") is empty on a stock macOS — which had every
+ * "monospace" surface in this app, code views included, quietly rendering in Helvetica.
+ * Menlo ships with macOS and always resolves. Do not move it back down the list.
+ */
 .console-text {
-    -fx-font-family: "SF Mono", "Menlo", "Monaco", monospace;
+    -fx-font-family: "Menlo", "Monaco", "SF Mono", monospace;
     -fx-text-fill: -ink;
     -fx-background-color: transparent;
     -fx-highlight-fill: -future-accent;
@@ -361,7 +371,7 @@
 }
 
 .stream-console .text {
-    -fx-font-family: "SF Mono", "Menlo", "Monaco", monospace;
+    -fx-font-family: "Menlo", "Monaco", "SF Mono", monospace;
     -fx-fill: -ink;
 }
 
@@ -389,7 +399,7 @@
 }
 
 .elapsed-timer {
-    -fx-font-family: "SF Mono", "Menlo", "Monaco", monospace;
+    -fx-font-family: "Menlo", "Monaco", "SF Mono", monospace;
     -fx-font-size: 1.15em;
     -fx-font-weight: bold;
     -fx-text-fill: -ink-muted;
@@ -450,7 +460,7 @@
 }
 
 .score-value {
-    -fx-font-family: "SF Mono", "Menlo", "Monaco", monospace;
+    -fx-font-family: "Menlo", "Monaco", "SF Mono", monospace;
     -fx-font-size: 1.15em;
     -fx-font-weight: bold;
 }
@@ -496,7 +506,7 @@
 }
 
 .code-area .text {
-    -fx-font-family: "SF Mono", "Menlo", "Monaco", monospace;
+    -fx-font-family: "Menlo", "Monaco", "SF Mono", monospace;
     -fx-fill: -ink;
 }
 
@@ -512,7 +522,7 @@
 .code-area .lineno {
     -fx-background-color: -surface-sunken;
     -fx-text-fill: -ink-muted;
-    -fx-font-family: "SF Mono", "Menlo", "Monaco", monospace;
+    -fx-font-family: "Menlo", "Monaco", "SF Mono", monospace;
     -fx-padding: 0 0.6em 0 0.6em;
 }
 
@@ -634,7 +644,7 @@
 }
 
 .stat-value {
-    -fx-font-family: "SF Mono", "Menlo", "Monaco", monospace;
+    -fx-font-family: "Menlo", "Monaco", "SF Mono", monospace;
     -fx-font-size: 1.25em;
     -fx-font-weight: bold;
     -fx-text-fill: -ink;
@@ -708,7 +718,7 @@
 }
 
 .trace-console .text {
-    -fx-font-family: "SF Mono", "Menlo", "Monaco", monospace;
+    -fx-font-family: "Menlo", "Monaco", "SF Mono", monospace;
     -fx-font-size: 0.95em;
     -fx-fill: -ink-muted;
 }
@@ -755,7 +765,7 @@
 
 /* The count under each panel. */
 .trace-count {
-    -fx-font-family: "SF Mono", "Menlo", "Monaco", monospace;
+    -fx-font-family: "Menlo", "Monaco", "SF Mono", monospace;
     -fx-font-size: 1.05em;
     -fx-font-weight: bold;
     -fx-padding: 0.3em 0.6em 0.3em 0.6em;
