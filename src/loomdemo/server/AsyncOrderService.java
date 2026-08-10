@@ -49,18 +49,36 @@ public final class AsyncOrderService {
      * <em>last</em> value forward, the caller cannot reach {@code user} here without either
      * nesting the stages or inventing a type to carry it — which is the cost the comparison
      * tab is trying to show.
+     *
+     * <p><strong>This layer composes rather than calls, and that is the point.</strong> A
+     * service layer whose methods return futures cannot call the layer below it and wait —
+     * it has to hand the layer below a continuation. So {@code chargeCard} is not on the
+     * stack when the gateway throws; it returned long before, having only <em>scheduled</em>
+     * the work. {@link OrderService#chargeCard} calls and waits, so its frame is still there.
+     *
+     * <p>That is a second boundary on top of the handler's, and each one costs a frame.
+     * Writing this the other way — calling {@code callPaymentGateway} inline inside one
+     * supplier — would keep the frame, at the price of hand-rolling every layer boundary
+     * instead of composing it. Either way you pay; this is the version people actually write.
      */
     public CompletableFuture<Receipt> chargeCard(User user, Order order) {
-        return CompletableFuture.supplyAsync(
-                () -> callPaymentGateway(user, order), after(timings.chargeCard()));
+        return callPaymentGateway(user, order)
+                .thenApply(authCode -> new Receipt(order.id(), user.email(), authCode));
     }
 
-    /** Identical to {@link OrderService}'s, deliberately — only the timing differs. */
-    private Receipt callPaymentGateway(User user, Order order) {
-        if (gatewayDown) {
-            throw new IllegalStateException("payment gateway timeout");
-        }
-        return new Receipt(order.id(), user.email(), "PAID");
+    /**
+     * The same two jobs as {@link OrderService}'s gateway, split the same way — only the
+     * waiting differs. {@code thenApply} above, not {@code thenApplyAsync}: the continuation
+     * runs on whichever thread completed this future, which is the event loop, so building
+     * a record does not cost another hop.
+     */
+    private CompletableFuture<String> callPaymentGateway(User user, Order order) {
+        return CompletableFuture.supplyAsync(() -> {
+            if (gatewayDown) {
+                throw new IllegalStateException("payment gateway timeout");
+            }
+            return "auth-" + order.id();
+        }, after(timings.chargeCard()));
     }
 
     private Executor after(int millis) {

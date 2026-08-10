@@ -49,23 +49,23 @@ public final class OrderService {
     /**
      * Needs <em>both</em> earlier results, which is the whole reason the async version of
      * this chain cannot be written flat.
+     *
+     * <p>Two layers with separate jobs: the gateway does the I/O and answers with an
+     * authorisation code, this turns that into a {@link Receipt}. A blocking service layer
+     * calls the layer below it and waits, so <strong>both frames are live</strong> when the
+     * gateway throws. {@link AsyncOrderService} cannot do that — see the note there.
      */
     public Receipt chargeCard(User user, Order order) {
-        pause(timings.chargeCard());
-        return callPaymentGateway(user, order);
+        String authCode = callPaymentGateway(user, order);   // blocks
+        return new Receipt(order.id(), user.email(), authCode);
     }
 
-    /*
-     * A second method under chargeCard so a failure has a real call chain inside the stage,
-     * rather than a trace one frame deep. Both frames survive the async hop, and should —
-     * everything a stage calls synchronously stays on its stack. What does not survive is
-     * everything BELOW the stage boundary.
-     */
-    private Receipt callPaymentGateway(User user, Order order) {
+    private String callPaymentGateway(User user, Order order) {
+        pause(timings.chargeCard());
         if (gatewayDown) {
             throw new IllegalStateException("payment gateway timeout");
         }
-        return new Receipt(order.id(), user.email(), "PAID");
+        return "auth-" + order.id();
     }
 
     /**

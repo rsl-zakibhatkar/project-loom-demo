@@ -340,11 +340,17 @@ public final class OrderServer {
      * The same failure, reached the same way, through both handler shapes. What differs is
      * what you can read afterwards.
      *
-     * Measured on this JDK (21.0.12): the blocking trace carries 12 frames, 3 of them ours
-     * — including boomHandler itself — and 6 the server's own request path:
-     * Filter$Chain.doFilter, AuthFilter, ServerImpl$Exchange.run. The async trace carries 13,
-     * only 2 of them ours, no handler frame, and NONE of the request path: its cause bottoms
-     * out at AsyncSupply.run -> runWorker -> Thread.run, a pool worker.
+     * Measured on this JDK (21.0.12): the blocking trace carries 12 frames, 3 of them ours —
+     * callPaymentGateway, chargeCard above it, boomHandler above that — and 6 the server's
+     * own request path: Filter$Chain.doFilter, AuthFilter, ServerImpl$Exchange.run. The async
+     * trace carries 13, only ONE of them ours, and NONE of the request path: its cause
+     * bottoms out at AsyncSupply.run -> runWorker -> Thread.run, a pool worker.
+     *
+     * Three against one, and the two missing frames are both layer boundaries. chargeCard is
+     * gone because AsyncOrderService composes on the gateway rather than calling it and
+     * waiting; boomHandler is gone for the same reason one level up. Adding more services
+     * would not widen this: sequential calls have already returned and are on NEITHER trace,
+     * and nested synchronous calls survive on both. Only boundaries separate them.
      *
      * Note the async trace is the LONGER of the two and still says less. That is the shape
      * of the problem: what you lose is not frames, it is the caller chain.
@@ -488,7 +494,7 @@ public final class OrderServer {
      */
     private static byte[] json(Receipt receipt) {
         return ("{\"orderId\":\"" + receipt.orderId() + "\",\"sentTo\":\""
-                + receipt.sentTo() + "\",\"status\":\"" + receipt.status() + "\"}")
+                + receipt.sentTo() + "\",\"authCode\":\"" + receipt.authCode() + "\"}")
                 .getBytes(StandardCharsets.UTF_8);
     }
 }

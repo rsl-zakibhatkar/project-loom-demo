@@ -210,10 +210,13 @@ your warm-up run does not die, raise the sleep in the editor and it will.
 7. **Then prove the last sentence.** Press **Break it**. One request goes to an endpoint
    that always fails, through both handler shapes, and the two real stack traces come back
    side by side. No load test, no waiting.
-   - Both traces name `chargeCard` and `callPaymentGateway` — the same methods that were on
-     the handler slide a moment ago. Say so first; you are not claiming async loses your code.
-   - The blocking trace also names `boomHandler`, the handler itself. The async one does not,
-     and it has no sign of `findUser` or `findOrder` either — they ran on other threads.
+   - Both traces name the payment gateway — the same service that was on the handler slide a
+     moment ago. Say so first; you are not claiming async loses your code.
+   - Then count what is around it. The blocking trace names **three** of your methods:
+     `callPaymentGateway`, `chargeCard` above it, and `boomHandler` above that. The async
+     trace names **one**. `chargeCard` is missing because the async service layer *composes*
+     on the gateway rather than calling it and waiting — it had already returned. `boomHandler`
+     is missing for the same reason, one level up. Every boundary costs a frame.
    - The blocking trace also carries the request: `Filter.doFilter`, `Exchange.run`,
      six frames of it, in the era's own colour. The async trace has **none** — it runs
      `AsyncSupply.run` → `runWorker` → `Thread.run` and stops. Nothing is abbreviated; that
@@ -260,8 +263,8 @@ comparison is invalid. Re-run one side to match.
 | Thread bomb dies at a surprising number | Say the number out loud and move on. It is machine-specific and the contrast is unaffected. |
 | The thread bomb does not die at all | Only possible on a machine whose thread limit is high enough that creation outruns the one-second sleep. Change `Duration.ofSeconds(1)` to `ofMinutes(1)` in the editor and run again — the past side dies for certain, and you simply stop before running the present side, which would now never finish. |
 | Break it shows an error in a panel | It could not reach the server. Press **Show the chart** and then **Break it** again — it rebinds the server each time, so a second attempt is a fresh start. The error stays inside the panel and takes nothing else down. |
-| Someone says async keeps the stack trace | Agree, and show them: the `Caused by:` section is right there, naming `chargeCard` and `callPaymentGateway`. Then read the counts out loud — the request path is 6 against 0, and `getCause()` does not bring it back. |
-| Someone asks what was lost, if all the frames are there | Point at the three names on the handler slide, then at the async trace. `boomHandler` is missing, and so are `findUser` and `findOrder` — they ran for this request, on other threads. Everything a stage called synchronously survives; everything that called *it* is gone. |
+| Someone says async keeps the stack trace | Agree, and show them: the `Caused by:` section is right there, naming the payment gateway. Then read the counts out loud — three of your methods against one, and the request path 6 against 0. `getCause()` brings back none of it. |
+| Someone asks what was lost, if all the frames are there | Every layer boundary. `chargeCard` called the gateway and waited on the blocking side, so it is on the trace; on the async side it composed and returned, so it is not. Same for the handler, and for all six request frames. Do **not** claim `findUser`/`findOrder` — they had returned and are on neither trace. |
 | Someone says you would use a record, not nested lambdas | Agree — the comment under the async handler already says so. That is the trade: two nested lambdas, or a type your domain never asked for, threaded through every stage. The blocking version needs neither. |
 | Someone says the two programs are different | Scroll the console to the `$ java …` line: it is identical in both runs. Then put the two sources side by side — one word, one line. That is the whole answer. |
 | Errors appear on a stats panel | Hover the errors figure for the actual failure kinds. Most likely something else on the machine is holding ports or CPU. Press Stop, then Run again. |
@@ -373,23 +376,23 @@ and that is the argument the tab is making.
 
 ### Break it counts request frames, not "your" frames
 
-The obvious version of this exhibit counts frames belonging to the app and shows 3 against
-0. That version is wrong, and it would not survive the first sharp question.
+The obvious version of this exhibit counts frames belonging to the app and shows *something*
+against **0**. That version is wrong, and it would not survive the first sharp question.
 
 `.exceptionally(failure -> …)` receives a `CompletionException`. Its *own* stack trace is
 pure `CompletableFuture` machinery — but it wraps the original `IllegalStateException`,
 which was constructed inside `callPaymentGateway`, so a `Caused by:` section carries all
-the app's frames from inside that stage. "3 against 0" is only true if the panel hides that
-section, and someone who says *"just call `getCause()`"* would be right.
+the app's frames from inside that stage — here, the gateway itself. A zero is only true if
+the panel hides that section, and someone who says *"just call `getCause()`"* would be right.
 
 So the panel shows the whole trace, cause included, and counts something that is genuinely
 zero on one side: frames naming the HTTP server's request path. Measured on this JDK:
 
 | | total frames | app | request path |
 | --- | --- | --- | --- |
-| past, blocking | 12 | 3 — incl. the handler | **6** |
-| workaround, async | 13 | 2 (under `Caused by:`), no handler | **0** |
-| present, blocking | 11 | 3 — incl. the handler | **6** |
+| past, blocking | 12 | 3 — gateway, `chargeCard`, handler | **6** |
+| workaround, async | 13 | 1 (under `Caused by:`) — the gateway alone | **0** |
+| present, blocking | 11 | 3 — gateway, `chargeCard`, handler | **6** |
 
 Both traces name the payment gateway. Only one says a request was involved — and no amount
 of unwrapping puts it back, because it was never on that stack. That is exactly the claim
@@ -413,13 +416,41 @@ exactly what that costs. Read them bottom-up:
 | | reads as |
 | --- | --- |
 | blocking | `Thread.run ← Exchange.run ← doFilter ← boomHandler ← chargeCard ← callPaymentGateway` |
-| async | `Thread.run ← runWorker ← AsyncSupply.run ← chargeCard ← callPaymentGateway` |
+| async | `Thread.run ← runWorker ← AsyncSupply.run ← callPaymentGateway` |
 
 The blocking trace is one continuous story: a request arrived, went through the filter chain,
 reached your handler, which charged a card, which called the gateway. The async trace starts
-at a pool worker. `boomHandler` is not on it — and neither are `findUser` or `findOrder`,
-which really did run for this request, on two other threads, moments earlier. They are not
-abbreviated. They are *absent*.
+at a pool worker and gets one frame in. Three of your methods against one.
+
+**Be careful about which frames are missing, because it is easy to overclaim here.**
+`findUser` and `findOrder` are on **neither** trace. They returned before `chargeCard` was
+ever called, so they popped off the blocking stack too — a stack trace is the live call
+chain, not a history of the request. If someone points that out, they are right, and the
+exhibit does not need them.
+
+What is genuinely missing from the async side is **every layer boundary**: `chargeCard`,
+`boomHandler`, and the six request frames under it. Those were all live on the blocking
+stack at the moment of failure.
+
+### Why adding more services would not help
+
+Worth knowing before anyone suggests a bigger service chain would make the point harder:
+
+- **Sequential calls** — `findUser`, `findOrder` — have already returned. They are on neither
+  trace, so adding ten more changes nothing on either side.
+- **Nested synchronous calls** survive on *both* sides. Everything a stage calls
+  synchronously stays on its stack, cause section included. Adding depth adds it to blocking
+  and async equally.
+- **Layer boundaries** are the only thing that separates them. Each `thenApply` /
+  `thenCompose` / `supplyAsync` between you and the failure is one frame blocking keeps and
+  async does not.
+
+Which is why `AsyncOrderService.chargeCard` returns
+`callPaymentGateway(...).thenApply(...)` rather than calling the gateway inline inside one
+supplier. Inline, the frame survives and the exhibit is weaker by one — but that is not how a
+service layer whose methods return futures gets written, because it cannot call the layer
+below it and wait. Either shape is defensible and either one costs you something; this is the
+one people actually write.
 
 Every `thenApply` / `thenCompose` is another cut, so a deeper pipeline loses more. Measured,
 the same four steps written both ways, failing in the last:
