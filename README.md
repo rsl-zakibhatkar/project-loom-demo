@@ -207,8 +207,9 @@ your warm-up run does not die, raise the sleep in the editor and it will.
    - Both traces name `callPaymentGateway`. Say so first — you are not claiming async
      loses your code.
    - The blocking trace also carries the request: `Filter.doFilter`, `Exchange.run`,
-     six frames of it, in the era's own colour. The async trace has **none** — it bottoms
-     out at `AsyncSupply.run` on a pool worker.
+     six frames of it, in the era's own colour. The async trace has **none** — it runs
+     `AsyncSupply.run` → `runWorker` → `Thread.run` and stops. Nothing is abbreviated; that
+     really is the bottom of that stack.
    - The counts underneath read **6** and **0**.
    - **`Same failure. One trace tells you where.`**
 
@@ -217,6 +218,14 @@ the `Caused by:` section with all three of your frames in it. Point at it. Then 
 what unwrapping cannot give back: the request is not on that stack at any depth. That is
 what the counter counts, and it is why it says frames tying this to a *request* rather
 than frames from your code.
+
+**And if they follow up with "so what have I actually lost?"** — the async panel is the
+*longer* of the two and still says less. Read it bottom-up. The blocking trace is one
+continuous story: a request arrived, went through the filter chain, reached your handler,
+which loaded an order, which called the gateway. The async trace starts at a pool worker.
+Everything your stage called synchronously survives; everything that called *it* does not.
+Here that costs six frames. In a real pipeline every `thenApply` is another cut, and the
+earlier stages go too — see *What is actually lost* below for the measured version.
 
 **Say this out loud**: the handler code is identical in both runs. The only thing that
 changed is the executor the server hands requests to. And the load generator uses virtual
@@ -244,6 +253,7 @@ comparison is invalid. Re-run one side to match.
 | The thread bomb does not die at all | Only possible on a machine whose thread limit is high enough that creation outruns the one-second sleep. Change `Duration.ofSeconds(1)` to `ofMinutes(1)` in the editor and run again — the past side dies for certain, and you simply stop before running the present side, which would now never finish. |
 | Break it shows an error in a panel | It could not reach the server. Press **Show the chart** and then **Break it** again — it rebinds the server each time, so a second attempt is a fresh start. The error stays inside the panel and takes nothing else down. |
 | Someone says async keeps the stack trace | Agree, and show them: the `Caused by:` section is right there with all three frames. Then read the counts out loud — the request path is 6 against 0, and `getCause()` does not bring it back. |
+| Someone asks what was lost, if all the frames are there | The async panel is longer and says less. Everything your stage called synchronously survives; everything that called *it* is gone. Blocking reads as one story from failure to entry point; async starts at a pool worker. |
 | Someone says the two programs are different | Scroll the console to the `$ java …` line: it is identical in both runs. Then put the two sources side by side — one word, one line. That is the whole answer. |
 | Errors appear on a stats panel | Hover the errors figure for the actual failure kinds. Most likely something else on the machine is holding ports or CPU. Press Stop, then Run again. |
 | The code got edited into something broken | **Reset** button above the editor restores the original source for that mode or snippet. If you run it broken first, the real `javac` error appears in the console — which is a fine thing to show on purpose. |
@@ -369,12 +379,50 @@ zero on one side: frames naming the HTTP server's request path. Measured on this
 | | total frames | app | request path |
 | --- | --- | --- | --- |
 | past, blocking | 12 | 3 | **6** |
-| workaround, async | 10 | 3 (under `Caused by:`) | **0** |
+| workaround, async | 14 | 3 (under `Caused by:`) | **0** |
 | present, blocking | 11 | 3 | **6** |
 
 Both traces name the payment gateway. Only one says a request was involved — and no amount
 of unwrapping puts it back, because it was never on that stack. That is exactly the claim
 the async handler's own comment makes, and now the tab demonstrates it.
+
+Note the async trace is the **longer** of the two and still says less. That is the shape of
+the whole problem, and it is worth saying out loud: what async costs you is not frames, it
+is the caller chain. A stack trace answers two questions — *what broke* and *what was being
+done*. Async still answers the first perfectly. It stops answering the second.
+
+### What is actually lost, if the frames all survive
+
+The strongest objection to this exhibit is that the `Caused by:` section looks just like the
+blocking trace, so what is the problem? The honest answer is that **everything a stage calls
+synchronously stays on its stack, and everything below the stage boundary does not.** The
+async trace is not missing your code. It is missing the context in which your code ran.
+
+The tab's version is the mildest possible case: the failure is in the *first* stage, so the
+only thing under the boundary is the server itself — six request frames. A realistic
+pipeline loses more, because every `thenApply` / `thenCompose` is another cut. Measured, the
+same four steps written both ways, failing in the last one:
+
+| | frames from your code | what they tell you |
+| --- | --- | --- |
+| nested calls, blocking | 5 | `callGateway ← chargeCard ← reserveStock ← checkout ← main` |
+| composed stages, async | 3 | `callGateway ← chargeCard ← reserveStock ← ` a pool worker |
+
+`checkout` and `main` are gone — not abbreviated, *absent*. They were never on that thread.
+The trace tells you the gateway call failed inside `reserveStock`; it cannot tell you that
+`reserveStock` was reached from a checkout, because it wasn't — it was reached from
+`ThreadPoolExecutor.runWorker`. In the blocking version the trace is one continuous story
+from the failure down to the entry point. In the async version it is a fragment of a story,
+starting wherever the current stage happened to begin.
+
+Two shapes make it worse still, and are worth mentioning if someone pushes: a future
+completed from an I/O callback via `completeExceptionally` carries the stack of *whatever
+thread constructed the exception*, which may contain none of your code at all; and
+`orTimeout` fails you from a timer thread, with a `TimeoutException` whose trace is a
+scheduler and nothing else.
+
+Virtual threads give the second question back for free, because the whole request really is
+one stack.
 
 Two consequences worth knowing before editing any of it:
 
@@ -388,6 +436,13 @@ Two consequences worth knowing before editing any of it:
   `Thread.run` — and those six frames are the pool worker the whole exhibit is about.
   Collapsing them would hide the point. The threshold exists for a pathologically deep
   trace on some other runtime; the harness asserts it stays dormant.
+- **`respondTrace` expands the trace itself rather than calling `printStackTrace`.** That
+  method abbreviates a cause to the frames it does not share with its wrapper, ending the
+  section with `... 3 more` — which stopped the async cause at `AsyncSupply.run` and invited
+  the one question the exhibit exists to answer: *is the request hiding under the "... 3
+  more"?* It is not, and showing the frames proves it where asserting it does not. Every
+  frame comes from `getStackTrace()`; only the abbreviation is dropped. Nothing on screen is
+  ever elided now, by us or by the JDK, and both harnesses check for a stray `...`.
 
 Break it rebinds the server to each era in turn to get a real trace from each, preferring
 whichever era is already running so a warm server costs nothing. It never runs a load test,

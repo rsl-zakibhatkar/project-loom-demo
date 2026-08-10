@@ -343,8 +343,11 @@ public final class OrderServer {
      *
      * Measured on this JDK (21.0.12): the blocking trace carries 12 frames, 3 of them ours
      * and 6 of them the server's own request path — Filter$Chain.doFilter, AuthFilter,
-     * ServerImpl$Exchange.run. The async trace carries 10 frames and NONE of the request
-     * path: it bottoms out at AsyncSupply.run on a pool worker.
+     * ServerImpl$Exchange.run. The async trace carries 14 and NONE of the request path: its
+     * cause bottoms out at AsyncSupply.run -> runWorker -> Thread.run, a pool worker.
+     *
+     * Note the async trace is the LONGER of the two and still says less. That is the shape
+     * of the problem: what you lose is not frames, it is the caller chain.
      *
      * Both traces name callPaymentGateway. The async one only does so under "Caused by:",
      * and the tab shows that section rather than hiding it — "just call getCause()" is a
@@ -386,9 +389,11 @@ public final class OrderServer {
     }
 
     /*
-     * Two methods rather than one, so there are real frames to lose. A single throwing
-     * method would give a trace so short that "which frames survived" would not be a
-     * question worth asking.
+     * Two methods rather than one, so the stage has a real call chain inside it. Both of
+     * them survive the async hop, and should — everything a stage calls synchronously stays
+     * on its stack. What does not survive is anything BELOW the stage boundary: the handler
+     * that submitted it, the filter chain, the exchange. A single throwing method would
+     * make the surviving side of that line too short to see.
      */
 
     private static String loadOrder(String id) {
@@ -399,18 +404,46 @@ public final class OrderServer {
         throw new IllegalStateException("payment gateway timeout");
     }
 
+    /** A cause chain deeper than this is a bug somewhere; stop rather than loop forever. */
+    private static final int MAX_CAUSE_DEPTH = 10;
+
     /**
-     * Serialise the failure and send it back as the response body.
+     * Serialise the failure and send it back as the response body, with every frame.
      *
-     * <p>{@code printStackTrace} rather than anything hand-rolled: the {@code Caused by:}
-     * section and the JDK's own {@code ... N more} elision have to be the real ones, or the
-     * exhibit is just this app's opinion about stack traces.
+     * <p>Deliberately not {@code printStackTrace}. That method abbreviates a cause's trace
+     * to the frames it does <em>not</em> share with the wrapper above it, ending the section
+     * with {@code ... 3 more} — so the async trace stops at {@code AsyncSupply.run} and the
+     * three frames underneath it are never shown. Which invites exactly the question the
+     * exhibit exists to answer: <em>is the request hiding under the "... 3 more"?</em>
+     *
+     * <p>It is not, and the way to prove that is to show the frames rather than assert it.
+     * Expanded, the cause's own stack runs all the way down to {@code Thread.run} on a pool
+     * worker with no request anywhere below it. Every frame here comes from
+     * {@link Throwable#getStackTrace()}; the only thing dropped is the JDK's abbreviation.
      */
     private static void respondTrace(HttpExchange exchange, Throwable failure) {
         StringWriter text = new StringWriter();
-        failure.printStackTrace(new PrintWriter(text));
+        PrintWriter out = new PrintWriter(text);
+
+        out.println(failure);
+        printFrames(out, failure);
+        Throwable cause = failure.getCause();
+        for (int depth = 0; cause != null && depth < MAX_CAUSE_DEPTH; depth++) {
+            out.println("Caused by: " + cause);
+            printFrames(out, cause);
+            cause = cause.getCause();
+        }
+        out.flush();
+
         respond(exchange, 500, text.toString().getBytes(StandardCharsets.UTF_8),
                 "text/plain; charset=utf-8");
+    }
+
+    /** One frame per line, in the JDK's own format so the panel's classifier is unchanged. */
+    private static void printFrames(PrintWriter out, Throwable failure) {
+        for (StackTraceElement frame : failure.getStackTrace()) {
+            out.println("\tat " + frame);
+        }
     }
 
     private static String idFrom(HttpExchange exchange) {
