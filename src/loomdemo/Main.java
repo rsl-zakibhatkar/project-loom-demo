@@ -18,18 +18,22 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
+import loomdemo.ui.FrameByFrameTab;
+import loomdemo.ui.MillionLockersTab;
 import loomdemo.ui.PerfCompareTab;
 import loomdemo.ui.Scoreboard;
 import loomdemo.ui.ThreadBombTab;
+import loomdemo.ui.ThreadPerRequestTab;
 import loomdemo.ui.Threads101Tab;
+import loomdemo.ui.WorkaroundTab;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
 /**
- * Application shell: title bar, the persistent scoreboard, the two demo tabs and the
- * global keyboard shortcuts.
+ * Application shell: title bar, the persistent scoreboard, the demo tabs and the global
+ * keyboard shortcuts.
  *
  * <p>Startup is deliberately cheap — no child JVM, no HTTP server, no load generator is
  * created here. Those spin up on first use so the app is on screen fast when it is
@@ -50,14 +54,32 @@ public class Main extends Application {
 
         Threads101Tab threads101Tab = new Threads101Tab();
         ThreadBombTab threadBombTab = new ThreadBombTab(scoreboard);
+        ThreadPerRequestTab threadPerRequestTab = new ThreadPerRequestTab();
+        WorkaroundTab workaroundTab = new WorkaroundTab();
+        FrameByFrameTab frameByFrameTab = new FrameByFrameTab();
         PerfCompareTab perfCompareTab = new PerfCompareTab();
+        MillionLockersTab millionLockersTab = new MillionLockersTab();
 
-        // Order is the talk's order: what a thread is, then what platform threads cost,
-        // then what that costs a server.
+        // Order is the talk's order: what a thread is, then what platform threads cost, then
+        // why we spent one per request anyway (it was the good design), then what giving that
+        // design up costs you, then the mechanism that makes waiting cheap, then what that
+        // mechanism is worth to a server — and finally a late-story pitfall, ThreadLocal at a
+        // million threads.
+        //
+        // The Workaround sits directly after Thread-per-Request because it is the bill for
+        // it: the room has just been shown a stack trace that is the whole request, and the
+        // next thing it sees is the same failure without one.
+        //
+        // Frame by Frame sits BEFORE the comparison on purpose: the room should know what
+        // mounting and unmounting are before being shown the throughput they buy.
         tabPane = new TabPane(
                 demoTab("Threads 101", threads101Tab.getNode(), threads101Tab),
                 demoTab("Thread Bomb", threadBombTab.getNode(), threadBombTab),
-                demoTab("Performance Comparison", perfCompareTab.getNode(), perfCompareTab));
+                demoTab("Thread-per-Request", threadPerRequestTab.getNode(), threadPerRequestTab),
+                demoTab("The Workaround", workaroundTab.getNode(), workaroundTab),
+                demoTab("Frame by Frame", frameByFrameTab.getNode(), frameByFrameTab),
+                demoTab("Performance Comparison", perfCompareTab.getNode(), perfCompareTab),
+                demoTab("A Million Lockers", millionLockersTab.getNode(), millionLockersTab));
         tabPane.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
 
         root.setTop(buildTopBar(theme, scoreboard));

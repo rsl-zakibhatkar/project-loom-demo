@@ -14,9 +14,9 @@ import loomdemo.Mode;
  * have to break that guarantee to exist.
  *
  * <p>Two lines are load-bearing for the UI: {@code "Died at thread #N of M"} and
- * {@code "Completed 1,000,000 tasks in Xs"}. {@link ChildJvmRunner} watches the output
- * stream for those and the tab promotes them to the big punchline banner. Editing them
- * live is fine; the demo still runs, you just lose the banner.
+ * {@code "All N threads alive"}. {@link ChildJvmRunner} watches the output stream for those
+ * and the tab promotes them to the big punchline banner. Editing them live is fine; the
+ * demo still runs, you just lose the banner.
  */
 public final class DemoSources {
 
@@ -35,21 +35,20 @@ public final class DemoSources {
      */
     private static final String TEMPLATE = """
             import java.time.Duration;
-            import java.util.concurrent.ExecutorService;
-            import java.util.concurrent.Executors;
-            import java.util.concurrent.ThreadFactory;
-            import java.util.concurrent.atomic.AtomicInteger;
 
             /*
              * ONE PROGRAM, RUN TWICE. ONE WORD DIFFERENT.
              *
-             * Ask for a million threads, each sleeping one second, and count how many you
+             * Ask for a million threads, each sleeping one hour, and count how many you
              * actually get. Everything here is identical in both runs except a single word
-             * on the factory line below: ofPlatform, or ofVirtual.
+             * on the marked line below: ofPlatform, or ofVirtual.
              *
              * A platform thread is a real OS thread with a 1 MB stack — cheap to create,
              * ruinously expensive to have. A virtual thread is a few hundred bytes on the
              * heap, and a blocking sleep parks it instead of pinning the carrier it runs on.
+             *
+             * The sleep is an hour so that nothing ever finishes while we are still counting.
+             * The only number here is how many threads are alive at once.
              *
              * Runs with: -Xmx2g -Xss1m — the same flags, both times.
              */
@@ -59,50 +58,39 @@ public final class DemoSources {
 
                 public static void main(String[] args) {
 
-                    // ↓   the only line that changes between the two runs   ↓
-                    ThreadFactory factory = Thread.$FACTORY$().factory();
-
-                    System.out.printf("Asking for %,d threads, each sleeping 1 second...%n", TASKS);
+                    System.out.printf("Asking for %,d threads, each sleeping 1 hour...%n", TASKS);
                     System.out.println();
 
-                    AtomicInteger completed = new AtomicInteger();
-                    ExecutorService executor = Executors.newThreadPerTaskExecutor(factory);
-                    long start = System.nanoTime();
                     int started = 0;
 
                     try {
                         for (int i = 1; i <= TASKS; i++) {
-                            executor.submit(() -> {
-                                Thread.sleep(Duration.ofSeconds(1));
-                                int done = completed.incrementAndGet();
-                                if (done % 100_000 == 0) {
-                                    System.out.printf("  completed: %,d%n", done);
+
+                            // ↓   the only word that changes between the two runs   ↓
+                            Thread.$FACTORY$().start(() -> {
+                                try {
+                                    Thread.sleep(Duration.ofHours(1));
+                                } catch (InterruptedException e) {
                                 }
-                                return null;
                             });
                             started = i;
 
-                            // Chatty for the first ten thousand, then every hundred thousand.
-                            if (i < 10_000 ? i % 100 == 0 : i % 100_000 == 0) {
-                                System.out.printf("  alive:     %,d%n", i);
+                            if (i % 1_000 == 0) {
+                                System.out.printf("  alive: %,d%n", i);
                             }
                         }
 
-                        System.out.printf("%nAll %,d threads are alive. Waiting for them...%n", TASKS);
-                        executor.close(); // blocks until every task has finished
+                        System.out.println();
+                        System.out.printf("All %,d threads alive.%n", TASKS);
 
                     } catch (Throwable failure) {
                         System.out.println();
                         System.out.printf("Died at thread #%,d of %,d%n", started + 1, TASKS);
                         System.out.println(failure);
 
-                        // Thousands of threads are still sleeping. Leave now, don't wait.
+                        // A thousand threads are still sleeping. Leave now, don't wait.
                         System.exit(0);
                     }
-
-                    double seconds = (System.nanoTime() - start) / 1_000_000_000.0;
-                    System.out.println();
-                    System.out.printf("Completed %,d tasks in %.2fs%n", TASKS, seconds);
 
                     System.exit(0);
                 }

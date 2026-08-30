@@ -37,8 +37,8 @@ public final class ThreadBombTab implements DemoTab {
 
     private static final Pattern DIED =
             Pattern.compile("Died at thread #([\\d,_]+) of ([\\d,_]+)");
-    private static final Pattern COMPLETED =
-            Pattern.compile("Completed ([\\d,_]+) tasks in ([\\d.]+)s");
+    private static final Pattern ALIVE =
+            Pattern.compile("All ([\\d,_]+) threads alive");
 
     private final JavaCodeArea editor = new JavaCodeArea();
     private final ConsolePane console = new ConsolePane();
@@ -265,13 +265,11 @@ public final class ThreadBombTab implements DemoTab {
                 punchlineShown = true;
                 return;
             }
-            Matcher completed = COMPLETED.matcher(line);
-            if (completed.find()) {
-                String count = completed.group(1);
-                String seconds = completed.group(2);
-                console.setPunchline("Completed " + count + " tasks in " + seconds + "s",
-                        Mode.FUTURE);
-                scoreboard.setResult(Mode.FUTURE, count + " ✓  in " + seconds + "s");
+            Matcher alive = ALIVE.matcher(line);
+            if (alive.find()) {
+                String count = alive.group(1);
+                console.setPunchline("All " + count + " threads alive", Mode.FUTURE);
+                scoreboard.setResult(Mode.FUTURE, count + " alive");
                 punchlineShown = true;
                 return;
             }

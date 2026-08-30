@@ -27,10 +27,22 @@ import java.util.List;
  * panel shows rather than hides, because "just call getCause()" is a fair objection. What
  * unwrapping cannot give back is the request: on the async side it is not on the stack at
  * any depth, and that is what the number counts.
+ *
+ * <p>That reading is the default rather than the only one — see {@link Metric}. A stack
+ * captured mid-<em>wait</em> rather than mid-failure has a different interesting question,
+ * and the Frame by Frame tab asks it of the same panel.
  */
 public final class TraceView {
 
-    /** Frames from the app itself. */
+    /**
+     * Frames from the app itself, and the default answer to "which frames are mine".
+     *
+     * <p>Only a default because not every trace this panel shows comes from this process. A
+     * snippet run in a child JVM has no package to name — it is compiled into the default one
+     * so the source launcher can find its main class — and its frames would all classify as
+     * {@link Kind#FRAMEWORK}, leaving a panel with nothing coloured and no exhibit. Such a
+     * caller passes its own marker instead; see the five-argument constructor.
+     */
     private static final String OWN_PACKAGE = "loomdemo.";
 
     /**
@@ -86,7 +98,43 @@ public final class TraceView {
     public record Line(String text, Kind kind) {
     }
 
-    private final String role;
+    /**
+     * The line under a trace.
+     *
+     * @param emphasised whether this reading <em>is</em> the point being made, in which case
+     *                   it is allowed to shout — a zero request count, or an OS thread that
+     *                   had to be held. See {@code .trace-count.zero}.
+     */
+    public record Footer(String text, boolean emphasised) {
+    }
+
+    /** How a panel measures the trace it is showing. */
+    @FunctionalInterface
+    public interface Metric {
+        Footer measure(String trace);
+    }
+
+    /**
+     * The original reading, and still the default: frames naming the HTTP request path.
+     *
+     * <p>Pluggable because it is not the only interesting question to ask of a stack. The
+     * Frame by Frame tab shows a stack captured mid-wait rather than mid-failure, where there
+     * is no HTTP request to count and a hard-coded zero would say something untrue.
+     */
+    public static final Metric REQUEST_FRAMES = trace -> {
+        int frames = requestFrameCount(trace);
+        return new Footer("Frames tying this to a request:  " + frames, frames == 0);
+    };
+
+    private static final String REQUEST_FRAMES_TOOLTIP =
+            "Frames naming the HTTP server's request path — Filter.doFilter, "
+                    + "Exchange.run.\nThey are what let you answer \"which request "
+                    + "broke?\" from the trace alone.";
+
+    private String role;
+    private final Metric metric;
+    /** What counts as "my code" here: a package prefix, or a snippet's source file name. */
+    private final String ownMarker;
     private final Label header = new Label();
     private final StyleClassedTextArea area = new StyleClassedTextArea();
     private final Label count = new Label();
@@ -100,8 +148,31 @@ public final class TraceView {
      * @param role the word after the era in the header — "blocking" or "async"
      */
     public TraceView(Era era, String role) {
+        this(era, role, REQUEST_FRAMES, REQUEST_FRAMES_TOOLTIP);
+    }
+
+    /**
+     * As above, with a reading of its own. Everything else about the panel is unchanged —
+     * the classifier, the colours and the collapsing are the same questions whatever the
+     * trace came from.
+     */
+    public TraceView(Era era, String role, Metric metric, String tooltip) {
+        this(era, role, metric, tooltip, OWN_PACKAGE);
+    }
+
+    /**
+     * As above, for a trace whose own frames are not this application's.
+     *
+     * @param ownMarker the substring that marks a frame as the reader's own code. Defaults to
+     *                  {@link #OWN_PACKAGE}; a snippet compiled into the default package has
+     *                  no package prefix to match and passes its source file name instead,
+     *                  which every frame javac compiled carries.
+     */
+    public TraceView(Era era, String role, Metric metric, String tooltip, String ownMarker) {
         this.era = era;
         this.role = role;
+        this.metric = metric;
+        this.ownMarker = ownMarker;
 
         header.setMaxWidth(Double.MAX_VALUE);
 
@@ -114,10 +185,7 @@ public final class TraceView {
         VBox.setVgrow(scroller, Priority.ALWAYS);
 
         count.setMaxWidth(Double.MAX_VALUE);
-        Tooltip.install(count, new Tooltip(
-                "Frames naming the HTTP server's request path — Filter.doFilter, "
-                        + "Exchange.run.\nThey are what let you answer \"which request "
-                        + "broke?\" from the trace alone."));
+        Tooltip.install(count, new Tooltip(tooltip));
 
         VBox body = new VBox(6, scroller, count);
         body.getStyleClass().add("trace-body");
@@ -140,6 +208,19 @@ public final class TraceView {
      * one structural class each, so replacing the lot is both shorter and impossible to get
      * out of step.
      */
+    /**
+     * Change the word after the era in the header.
+     *
+     * <p>Mutable for the same reason {@link #setEra} is: one panel is reused for more than one
+     * exhibit. The Frame by Frame tab's right-hand panel shows either a platform thread parked
+     * in the kernel or a virtual thread pinned to its carrier, and those are two different
+     * sentences about two different problems, not one sentence in two colours.
+     */
+    public void setRole(String role) {
+        this.role = role;
+        setEra(era);
+    }
+
     public void setEra(Era era) {
         this.era = era;
         header.getStyleClass().setAll("panel-header", era.styleClass());
@@ -147,11 +228,32 @@ public final class TraceView {
         node.getStyleClass().setAll("trace-panel", era.styleClass());
         header.setText(era.shortLabel().toUpperCase(java.util.Locale.US) + "  ·  " + role);
 
-        // The count keeps whatever state class it has; only its era changes.
-        List<String> stateClasses = new ArrayList<>(count.getStyleClass());
-        stateClasses.removeIf(c -> !c.equals("empty") && !c.equals("zero"));
+        // The count keeps whatever state it is in; only its era changes.
+        boolean zero = count.getStyleClass().contains("zero");
+        boolean empty = count.getStyleClass().contains("empty");
         count.getStyleClass().setAll("trace-count", era.styleClass());
-        count.getStyleClass().addAll(stateClasses);
+        setState(zero, empty);
+    }
+
+    /**
+     * Put the count label in exactly one state, replacing whatever it was in.
+     *
+     * <p>A replacement rather than an add/remove pair, because {@link #setEra} re-applies these
+     * classes every time it runs. The previous add/remove version accumulated duplicates — the
+     * class list is a plain {@code ObservableList}, {@code setAll} plus {@code addAll} appends
+     * a second {@code empty} on the next era change, and {@code remove} then drops only one of
+     * them. The survivor goes on matching {@code .trace-count.empty}, which sits <em>after</em>
+     * {@code .trace-count.zero} in the stylesheet and so wins the tie: a panel with a trace in
+     * it and something to shout about renders muted and unstyled instead.
+     */
+    private void setState(boolean zero, boolean empty) {
+        count.getStyleClass().removeAll("zero", "empty");
+        if (zero) {
+            count.getStyleClass().add("zero");
+        }
+        if (empty) {
+            count.getStyleClass().add("empty");
+        }
     }
 
     // ------------------------------------------------------------------ parsing
@@ -163,14 +265,19 @@ public final class TraceView {
      * the interesting edge cases, and it should not need a window to test.
      */
     public static List<Line> parse(String trace) {
+        return parse(trace, OWN_PACKAGE);
+    }
+
+    /** As above, reading {@code ownMarker} as the frames belonging to the reader. */
+    public static List<Line> parse(String trace, String ownMarker) {
         List<Line> classified = new ArrayList<>();
         for (String raw : trace.stripTrailing().lines().toList()) {
-            classified.add(new Line(raw, kindOf(raw)));
+            classified.add(new Line(raw, kindOf(raw, ownMarker)));
         }
         return collapse(classified);
     }
 
-    private static Kind kindOf(String raw) {
+    private static Kind kindOf(String raw, String ownMarker) {
         String line = raw.strip();
         if (line.startsWith("...")) {
             // The JDK's own "... 14 more" elision. Framework noise by definition.
@@ -179,7 +286,7 @@ public final class TraceView {
         if (!line.startsWith("at ")) {
             return Kind.HEADER;
         }
-        if (line.contains(OWN_PACKAGE)) {
+        if (line.contains(ownMarker)) {
             return Kind.MINE;
         }
         if (line.contains(REQUEST_PACKAGE)) {
@@ -226,25 +333,21 @@ public final class TraceView {
      * framework frames to be collapsed at all.
      */
     public static int requestFrameCount(String trace) {
-        return (int) trace.lines().filter(line -> kindOf(line) == Kind.REQUEST).count();
+        return (int) trace.lines()
+                .filter(line -> kindOf(line, OWN_PACKAGE) == Kind.REQUEST).count();
     }
 
     // ------------------------------------------------------------------ rendering
 
     public void setTrace(String trace) {
         area.replaceText("");
-        for (Line line : parse(trace)) {
+        for (Line line : parse(trace, ownMarker)) {
             area.append(line.text() + "\n", line.kind().styleClass());
         }
         area.showParagraphAtTop(0);
-        int frames = requestFrameCount(trace);
-        count.setText("Frames tying this to a request:  " + frames);
-        count.getStyleClass().remove("empty");
-        if (frames == 0) {
-            count.getStyleClass().add("zero");
-        } else {
-            count.getStyleClass().remove("zero");
-        }
+        Footer footer = metric.measure(trace);
+        count.setText(footer.text());
+        setState(footer.emphasised(), false);
     }
 
     /** A fetch that did not get far enough to produce a trace. Stays inside the panel. */
@@ -252,17 +355,13 @@ public final class TraceView {
         area.replaceText("");
         area.append(message + "\n", Kind.HEADER.styleClass());
         count.setText("no trace");
-        count.getStyleClass().remove("zero");
-        count.getStyleClass().add("empty");
+        setState(false, true);
     }
 
     public void clear() {
         area.replaceText("");
         count.setText("—");
-        count.getStyleClass().remove("zero");
-        if (!count.getStyleClass().contains("empty")) {
-            count.getStyleClass().add("empty");
-        }
+        setState(false, true);
     }
 
     public Era era() {

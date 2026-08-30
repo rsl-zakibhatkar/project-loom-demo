@@ -1,18 +1,28 @@
 # Loom Stage Demo
 
 A macOS desktop app for a live conference talk about Java Project Loom and virtual
-threads. Three demos, switchable via tabs:
+threads. Six demos, switchable via tabs:
 
-1. **Threads 101** — what a thread is, in ten lines you can re-run on demand
+1. **Threads 101** — what a thread is, and what two of them share, in code you can
+   re-run on demand
 2. **Thread Bomb** — what platform threads cost
-3. **Performance Comparison** — what that cost does to a server
+3. **Thread-per-Request** — why we spent one thread per request anyway: it was the good
+   design
+4. **Frame by Frame** — one blocking call, measured: mounting, unmounting, and the
+   carrier somebody else picks up
+5. **Performance Comparison** — what that cost does to a server
+6. **A Million Lockers** — the `ThreadLocal` memory leak on reused threads, and
+   `ScopedValue`
 
-Demo 2 carries a past/present toggle; demo 3 carries all three eras:
+Demos 2 and 4 carry a past/present toggle; demo 5 carries all three eras:
 
-- **Take me to the past** — platform threads: one per task on demo 2, a pool of 200 on
-  demo 3 · orange `#FFAB40`
+- **Take me to the past** — platform threads: one per task on demos 2 and 4, a pool of 200
+  on demo 5 · orange `#FFAB40`
 - **Take me to the workaround** — async callbacks, one thread per core · violet `#7E57C2`
 - **Take me to the present** — virtual threads, since Java 21 · teal `#0097A7`
+
+Demo 4 has no workaround era on purpose: the async handler has no thread to follow, which
+is the argument demo 5's **Break it** view already makes.
 
 Deliberately *present*, not *future*: virtual threads went final in Java 21 in September
 2023. Calling them the future on stage makes them sound like something to wait for rather
@@ -90,7 +100,7 @@ xattr -dr com.apple.quarantine "/Applications/Loom Demo.app"
 | --- | --- |
 | `⌘R` | Run the current tab's demo |
 | `⌘.` | Stop |
-| `⌘K` | Clear console (tabs 1 and 2) / reset stats (tab 3) |
+| `⌘K` | Clear console (tabs 1–3 and 6) / reset the board (tab 4) / reset stats (tab 5) |
 | `⌘P` | Toggle presentation mode (+30% on every font) |
 | `⌘D` | Toggle light/dark |
 
@@ -107,30 +117,70 @@ themes wash out badly on cheap hardware.
 1. Launch the app once and leave it open. Startup is about a second, but do it anyway.
 2. Turn on **Presentation** if the room is deep.
 3. Switch to the **light theme** unless you have checked the projector.
-4. Run each demo once as a warm-up, then `⌘K` on all three tabs. First runs are always the
+4. Run each demo once as a warm-up, then `⌘K` on all six tabs. First runs are always the
    slowest, and you would rather spend that on your own laptop than on stage.
 5. Plug in the power cable. Demos 2 and 3 are CPU-heavy for a few seconds and laptops
    throttle hard on battery.
 
 ### Demo 1 — Threads 101
 
-The app opens here. Three snippets, left to right, in the order you want them.
+The app opens here. Six snippets, left to right, in the order you want them.
 
-1. **Two Cooks** is preselected. Two threads, five lines each. Talk over the code, then
-   **Run** (`⌘R`). `cook-1` and `cook-2` come back in two different colours.
+1. **Two Cooks** is preselected. Two threads, three orders each. Talk over the code, then
+   **Run** (`⌘R`). `Cook#1` and `Cook#2` come back in two different colours, and every
+   order is a pair: `receives`, then the oven, then `serves`. The gap between a cook's two
+   lines is the thread being somewhere else — which is where the other cook's lines land.
 2. **Run it again. And again.** This is the whole demo. Each run is separated by a
    `──── Run #N ────` rule and the console *keeps* the earlier runs, so three runs stack up
    on screen and the audience can see for themselves that the order changed and the code
    did not. Re-running is instant — about 25 ms to the first line — so you can press it
    three times in a row without a pause to talk over.
-3. Ask what would happen if you called `run()` instead of `start()`, take a guess from the
+
+   Then, before you move on: ask the room to stop reading the names and read the *order
+   numbers* instead. There are two Order #1s. There are two Order #2s. Nothing raced —
+   both threads did exactly what the code says, every time. The code says the wrong thing:
+   `orderNo` is a local, and a local cannot identify an order that belongs to the whole
+   kitchen. Do not fix it yet. Just let the room see it.
+3. Now fix it. Switch to **Two Cooks, Shared** — the same two cooks, the same loop, and
+   one new object. Say "the only new thing is one order pad" before you run it. Then read
+   the two columns: the ticket on the left now runs 1 to 6 with no number appearing twice,
+   while `my N of 3` on the right resets to 1 when the other cook takes over. Same console
+   line, two counters, and they behave differently because they live in different places —
+   the tally is a local on that cook's own stack, the ticket comes off one object on the
+   heap that both cooks reach. Read the last two lines out loud: `Each cook handled 3
+   orders` against `The kitchen took 6 orders`. Worth pointing at the two `join()` calls —
+   the summary cannot print early, because main is still waiting on both cooks. And worth
+   naming what is holding the left column together: `AtomicInteger`. A plain `int++` there
+   would hand two cooks the same ticket and put Two Cooks' bug back, only intermittently
+   this time. The code says the fields are thread-safe on purpose and that the why is a
+   later slide — promise it, and keep the promise at **One Oven**.
+4. Ask what would happen if you called `run()` instead of `start()`, take a guess from the
    room, then switch to **run() vs start()**. Same code, two characters different. Every
    line now says `main`, in one colour, in order. Nobody argues with that.
-4. Finish on **Who's in my JVM?** — a program that starts no threads at all and still
+5. Now switch to **One Oven**. The two cooks no longer just take turns talking — they
+   share one object. Read the first two lines out loud: two threads, two colours, the
+   *same* `Oven@…` on both. That is the heap, and it is the only copy there is. Then let
+   the run finish. `reaches in for lasagna, pulls out risotto` and
+   `throws out risotto, puts lasagna in` are not error handling — nothing threw. Both
+   cooks did exactly what the code said. Worth landing the second one: `inside` is a
+   single reference, so overwriting it does not stack a dish on top of another — it
+   destroys one. The cook whose dish went in the bin is asleep for another 200 ms,
+   still believing it is baking.
+6. **One Oven, Locked** is the same program with one word added: `bake` is
+   `synchronized`. Say that before you run it, and offer to diff the two sources — every
+   other difference between them is a comment. Now every `puts X in` is followed by that
+   same cook's `takes X out`, and the two spoiled branches — still sitting right there in
+   the code — never run. Worth naming: the lock
+   *is* the oven. The object they share is the object they take turns on. Who gets it
+   first still varies run to run; what never happens again is two cooks inside it at once.
+7. Finish on **Who's in my JVM?** — a program that starts no threads at all and still
    finds six. "You have never written a single-threaded program."
 
 The caption above the editor changes with each snippet and says what to look for. The code
-is editable: change `i < 5` to `i < 20` and re-run if you want a longer interleave.
+is editable: change `orderNo <= 3` to `orderNo <= 10` and re-run if you want a longer
+interleave. In **Two Cooks, Shared** the loop counts `mine` up to the `ORDERS` constant,
+and both summary lines are computed from it and from the pad — edit it live and the two
+totals move together rather than going stale.
 
 **If you edit the code and then switch snippets**, an inline bar asks before replacing it.
 **Reset** restores the original snippet.
@@ -138,24 +188,25 @@ is editable: change `i < 5` to `i < 20` and re-run if you want a longer interlea
 ### Demo 2 — Thread Bomb
 
 **This is one program, run twice.** Both modes ask for a million threads, each sleeping one
-second, and count how many they actually get. The two sources differ by a single word on a
+hour, and count how many they actually get. The two sources differ by a single word on a
 single line, and they run under identical JVM flags. Say that out loud before you press
 anything — it is what stops the demo looking arranged.
 
 1. **Thread Bomb** tab. Toggle is on **Take me to the past**.
 2. Talk over the code on the left. Point at the marked line — `Thread.ofPlatform()` — and
    say it is the only thing that will change. The code is real, runnable and editable.
-3. **Run** (`⌘R`). The console streams `alive: 100 … 2,000` climbing.
+3. **Run** (`⌘R`). The console prints `alive: 1,000`, then `alive: 2,000` — two lines is the
+   whole climb the past side gets before the ceiling.
 4. It dies in well under a second. The punchline lands in huge orange type:
    **`Died at thread #2,021 of 1,000,000`**
 5. Switch to **Take me to the present**. The editor swaps — invite the room to spot the
    difference before you say it. It is `ofPlatform` → `ofVirtual`, and nothing else.
    (If you edited the code, you get an inline prompt before it is discarded.)
-6. **Run**. Same climb, four orders of magnitude further, then a pause on
-   `All 1,000,000 threads are alive. Waiting for them...` while the counter drains:
-   **`Completed 1,000,000 tasks in ~5.5s`**
+6. **Run**. The same counter, four orders of magnitude further — a thousand lines of it,
+   blurring past in well under a second:
+   **`All 1,000,000 threads alive`**
 7. The scoreboard at the top now reads
-   `PAST died at #2,021 | PRESENT 1,000,000 ✓ in 5.56s`. It stays there for the rest of the
+   `PAST died at #2,021 | PRESENT 1,000,000 alive`. It stays there for the rest of the
    talk, including when you switch tabs.
 
 **Both runs print the same command line** — `$ java -Xmx2g -Xss1m Demo.java` — at the top of
@@ -163,17 +214,148 @@ the console. Scroll up and show it if anyone suspects the flags did the work. `-
 the platform thread's 1 MB stack; virtual threads simply ignore it, which is the point.
 
 **Numbers to expect.** The death point is whatever your machine's thread limit allows —
-2,019–2,021 across thirteen runs on an M2 (`kern.num_taskthreads` is 2048), higher on
-machines with a larger limit. It varies per machine and that is fine; the gap to 1,000,000
-is the point. Check yours during the warm-up run so you can quote it confidently.
+**2,021 on three consecutive runs** on an 8-core M2, and 2,019–2,021 across thirteen earlier
+ones. `kern.num_taskthreads` is 2048 and the JVM's own threads take the remainder, so the
+number is strikingly repeatable on a given machine. It varies between machines and that is
+fine; the gap to 1,000,000 is the point. Check yours during the warm-up run so you can quote
+it confidently.
 
-The past side reaches the limit in about 90 ms, well inside the one-second sleep, so no
-thread has retired yet and death is certain. On a machine with a *much* higher thread limit
-— tens of thousands — creation could get slow enough that early threads start finishing and
-the program survives longer than you want. It has not happened on any Mac tested, but if
-your warm-up run does not die, raise the sleep in the editor and it will.
+Both sides are fast. The past side dies in about 0.35 s; the present side creates its million
+and prints in about 0.6 s, source-launcher compile included. A million parked virtual threads
+settle at roughly 550 MB live inside the 2 GB heap — a comfortable margin, so the present side
+is in no danger of dying on memory instead.
 
-### Demo 3 — Performance Comparison
+Because every thread sleeps for an hour, nothing can retire while the count is still climbing.
+The past side's death is a real ceiling rather than a race between creation and completion,
+and that holds on any machine, however high its thread limit.
+
+### Demo 3 — Thread-per-Request
+
+**Three snippets, switched like Threads 101.** This is the slide that says the old model was
+the *good* design, so the tab states the case rather than knocking it down. The snippets run
+the same `findUser → findOrder → chargeCard` chain you will meet again in Demos 4 and 5 — one thread
+per request, no callbacks — and between them make all four of the slide's points. The next
+tab is where the cost arrives.
+
+**The Handler** — *sequential, readable code* and *ThreadLocal context*.
+
+1. Talk over the code on the left. It reads top to bottom: find the user, find their order,
+   charge the card, each call needing the answer from the one before. Point at the
+   `ThreadLocal REQUEST_ID` set once at the top of the request.
+2. **Run** (`⌘R`). Two requests come back, each in its own colour, because each ran on its
+   own thread — *one thread, one request*. They run one after the other, so each colour is
+   one whole request.
+3. **The request id `[req-42]` / `[req-77]` is on every line — including the three service
+   lines**, and nothing passed it to `findUser`, `findOrder` or `chargeCard`. It rode down
+   the thread with the call. That is the ThreadLocal point — the same thing SLF4J's MDC and
+   a framework's request scope are built on — and it is the one thing no other tab shows.
+
+**ThreadLocal** — *how that context stays per-request.* The obvious objection to step 3:
+`REQUEST_ID` is declared `static final`, so there is only one of it — isn't a static field
+shared? Switch to this snippet to answer it.
+
+4. **Run**. Two threads, and the first two lines print the **same** `java.lang.ThreadLocal@…`
+   object — so yes, there is exactly one, shared. Yet look at the last four lines.
+5. The plain `static String shared` collides: one thread reads back the *other* thread's
+   value (last writer wins on the single slot — the same shared-state race as the Oven in
+   Demo 1). The `threadlocal` line right beside it reads each thread's **own** value every
+   time. Same shared key, a private value per thread — the ThreadLocal object is not a box,
+   it is a key into a map that lives inside each `Thread`.
+
+**When It Breaks** — *real stack traces* and *trivial to debug*. Switch to it with the
+picker (the confirm bar appears first if you have edited the code, exactly like Threads 101).
+
+6. Same handler, but the payment gateway is down and `chargeCard` throws. **Run**. The
+   request logs its three services, then `responded 500  (payment gateway timeout)`, then a
+   **real** stack trace.
+7. Read the trace bottom-up: `callPaymentGateway ← chargeCard ← serve`. Because one thread
+   ran the whole request, the trace *is* the whole request — nothing ran on another thread,
+   so nothing is missing. And the 500 line still names the request (`[req-42]`), from the
+   ThreadLocal, so you know *which* one failed without it being passed to the `catch`.
+
+Both snippets are editable. In **The Handler**, add a method to the chain and re-run to
+watch the trace grow (once you make it throw). **Reset** restores the current snippet.
+
+### Demo 4 — Frame by Frame
+
+**The slide of the same name, measured.** Slide 33 draws four boxes — VT-1 mounted on CT-1,
+VT-1 unmounted with its stack on the heap, CT-1 picking up somebody else, VT-1 resuming
+somewhere different. This tab runs the order service for real and puts the machine's own
+numbers into those four sentences.
+
+It calls the same three services demo 5 hits — `findUser`, `findOrder`, `chargeCard` —
+directly rather than over HTTP. Say that out loud: *the server is not the subject here; one
+request is.* Every request is marked on both sides of every blocking call, and each mark
+writes down the instant, the request, and the platform thread actually executing it.
+
+1. **Frame by Frame** tab. Defaults are 24 requests, `GET /order/slow/{id}` (300 ms),
+   **Take me to the present**. Press **Run**. It takes about a third of a second.
+   - The board fills: one lane per request on top, one lane per OS thread underneath, both
+     drawn against the same clock. Pale teal is waiting, solid teal is running.
+   - The headline reads roughly **`24 requests · 72 blocking calls · 8 carriers · 0 OS
+     threads blocked · 7,600 ms of request time cost 5 ms of carrier time (0.06%) · req-0
+     rode 3 carriers`**.
+2. **Press `Walk the steps ▶` four times.** The board winds back to the start of the run and
+   the four lines appear as they happened:
+   ```
+   STEP 01   req-0 mounted on worker-5 — calls findUser()
+   STEP 02   req-0 unmounted · stack → heap · parked 123.9 ms
+   STEP 03   worker-5 free instantly — now carrying req-3. The OS never knew.
+   STEP 04   findUser returns after 123.9 ms — req-0 resumes on worker-7, a different carrier.
+   ```
+   That is the slide, with real carrier names and real milliseconds. Keep clicking: steps
+   05–12 are the same thing happening for `findOrder` and `chargeCard`. **Play** walks the
+   whole thing on its own.
+3. **Press `Show the parked stack`.** Here is the part nobody can argue with: `req-0`'s
+   entire stack, captured from outside while it was in the middle of its wait —
+   `VirtualThread.parkNanos → sleepNanos → Thread.sleep → OrderService.pause →
+   OrderService.findUser`. Every frame is still there. The line underneath reads
+   **`OS thread holding this stack: none`**.
+4. **Switch to `Take me to the past` and press Run.** Same three calls, same 300 ms, one
+   platform thread per request.
+   - The board goes orange and every lane is solid from the first call to the last. The
+     carrier group collapses into one sentence, because there is nothing new to draw: the
+     rows above *are* the OS threads.
+   - The headline reads **`24 requests · 72 blocking calls · 24 OS threads · all 24 of them
+     blocked · 7,450 ms of thread time, 99.99% of it spent waiting`**.
+   - The STEP lines turn orange too, and say the opposite thing:
+     **`pool-thread-0 is not free — it belongs to req-0 until the request ends.`**
+5. **Press `Show the parked stack` again.** Both panels are now filled and side by side.
+   Read them as a pair: almost the same frames, `OrderService.findUser` on both. The
+   differences are the top and the bottom — `Thread.sleep0(Native Method)` against
+   `VirtualThread.parkNanos`, and `ThreadPoolExecutor.runWorker → Thread.run` against
+   nothing at all. The two lines underneath are the whole demo:
+   **`OS thread holding this stack: none`** against
+   **`OS thread holding this stack: pool-thread-0 (TIMED_WAITING)`**.
+   - **`Same frames. Only one of them costs an OS thread.`**
+
+**Then the slide's own punchline lands on its own**: *your code says "wait here" — but
+nothing expensive actually waits.*
+
+**Show the code** puts the eight marks on screen, along with how the carrier is read. It is
+worth ten seconds, because the honest answer to "how do you even know that?" is short:
+`Thread.toString()`. A mounted virtual thread prints
+`VirtualThread[#23,req-0]/runnable@ForkJoinPool-1-worker-1`; a parked one prints
+`VirtualThread[#23,req-0]/timed_waiting`, with no carrier at all. No agent, no JFR, no
+`jdk.internal`.
+
+**Two things to say before someone else does.**
+
+- The solid blocks are *drawn* at a minimum width. Under virtual threads a mounted stretch
+  is genuinely microseconds against a wait of hundreds of milliseconds, so at true scale it
+  would be a fraction of a pixel and simply would not appear. The caption under the board
+  says so, and the real figure is on the right of every row. Exaggerating the running time
+  argues *against* the point being made, which is why it is safe to do.
+- The record is eight measured instants per request, not a continuous trace. A mount that
+  happened between two marks would not show. At these latencies the JDK makes exactly the
+  transitions that are marked — one unmount per blocking call.
+
+**Why 24 requests and not 3.** With fewer requests than the machine has cores, nothing is
+ever queued for a carrier, so when `req-0` lets go of one, nobody takes it. The step log
+says so honestly — *"free instantly — and went idle, because nothing was queued for it"* —
+which is true but is not STEP 03. Twenty-four on eight cores guarantees the handover.
+
+### Demo 5 — Performance Comparison
 
 1. **Performance Comparison** tab. Defaults are `GET /order/{id}` (100 ms), 5,000
    requests, 2,000 concurrent — these give the sharpest contrast. **Requests** and
@@ -252,14 +434,57 @@ pool. That honesty buys you a lot of credibility.
 If you run the two sides with different settings, a red line appears telling you the
 comparison is invalid. Re-run one side to match.
 
+### Demo 6 — A Million Lockers
+
+**Two snippets, measured — the `ThreadLocal` leak, and the fix.** This is the late-talk
+pitfall (Story 3, "the ThreadLocal memory leak"). A `ThreadLocal` value lives as long as its
+**thread** does, not as long as the request does. On a pool of reused worker threads that is
+effectively forever: `set()` the context, forget `remove()`, and it stays in that thread's
+"locker" after the request is long gone. `ScopedValue` (preview in JDK 21, final in JDK 25)
+binds the context to a *block* instead, so it cannot outlive the request. Both snippets run
+the same pool of 200 threads serving 10,000 requests.
+
+**ThreadLocal** — the leak.
+
+1. **Run** (`⌘R`). 200 pooled threads serve 10,000 requests, each stashing a ~1 MB context
+   and never calling `remove()`. It finishes in a second or two.
+2. The punchline is the last line, measured **after the server is idle**: roughly
+   **`server idle, 10,000 requests finished: ~400 MB STILL HELD`** — 200 threads doing
+   nothing, each still clutching the last context it touched, for requests that finished long
+   ago. That is the leak.
+
+**ScopedValue** — the fix. Switch with the picker and **Run** again (the confirm bar appears
+first if you have edited the code).
+
+3. Same pool, same 10,000 requests, same ~1 MB context — but bound with
+   `ScopedValue.where(...).run(...)`: **`~0 MB still held`**. The console keeps both runs, so
+   the two "still held" lines sit one above the other: **~400 MB versus 0**.
+4. Say why: the value is reclaimed the instant the `run(...)` block returns — there is no
+   `remove()` to forget — and it is immutable, so nothing downstream can reassign it. A
+   framework like Spring used to hide the leak by calling `remove()` for you in a `finally`;
+   hand-rolled virtual-thread code has no such net. *"Old thread-per-request + ThreadLocal:
+   still fine. New virtual-thread code: reach for `ScopedValue`."*
+
+Because `ScopedValue` is a preview here, both snippets run under `--enable-preview --source
+21`; the child JVM prints a harmless `Note: … uses preview features` line. The leak lives in
+the child JVM, not the app.
+
 ### If something goes wrong mid-demo
 
 | Symptom | What to do |
 | --- | --- |
-| A run seems stuck | `⌘.` (Stop). Tabs 1 and 2 kill the child JVM; tab 3 abandons the load test and **keeps the previous result on screen**, so you never lose a filled panel to a bad run. |
-| Console is cluttered | `⌘K`. On tab 1 this also resets the run counter back to #1. On tab 3 it resets both panels and the chart, so only use it if you mean it. |
+| A run seems stuck | `⌘.` (Stop). Tabs 1–3 kill the child JVM; tabs 4 and 5 abandon the run and **keep the previous result on screen**, so you never lose a filled board or panel to a bad run. |
+| Console is cluttered | `⌘K`. On tabs 1–3 this also resets the run counter back to #1. On tab 4 it empties the board, the step log and both captured stacks, and on tab 5 both panels and the chart — so on those two, only use it if you mean it. |
+| One Oven behaved itself | It is a race, not a guarantee — though it collides on essentially every run. Run it again, or change `i < 3` to `i < 6` in the editor and re-run. |
 | Two Cooks produced the same order twice | Say so — it is genuinely random, not guaranteed to differ. Run it once more. Two identical runs followed by a different one makes the point better than a lecture would. |
+| Thread-per-Request's trace looks short | It is the real JDK trace, not a trimmed one — the chain is only three of your methods deep. Add a method to the `findUser → findOrder → chargeCard` chain in the editor and re-run to watch it grow by a frame. |
+| A Million Lockers ran out of memory | The child JVM asked for more than the machine had. Lower `CONTEXT_KB` or `POOL` in the editor (the leak is `POOL × CONTEXT_KB`), or raise the tab's `-Xmx`. The window stays up regardless — it runs in a child JVM. |
 | The workaround beat virtual threads | Expected, and fine. They are the same number and the run-to-run spread is wider than the gap. Say "same speed" and move to the handlers — that is where the argument actually is. |
+| Frame by Frame says "went idle" at STEP 03 | The scheduler had a spare carrier, so nobody took the one `req-0` released. It is honest, not broken. Raise **Requests** to 24 and run again — more requests than cores guarantees the handover. |
+| Frame by Frame shows a carrier called `carrier?` | This JDK prints `Thread.toString()` in a shape the carrier parser does not recognise. Everything else on the board is still true; the lane names are not. Mention it and move on — or switch to **Take me to the past**, which reads thread names directly and cannot hit this. |
+| The parked stack panel says "no snapshot could be captured" | The watcher missed its window. Press **Run** again; it looks for five seconds and the request waits for 120 ms three times, so a second attempt effectively always finds it. The previous stack stays on screen meanwhile. |
+| Someone asks why the running blocks look so big | Say it before they do — they are drawn at a minimum width or they would be sub-pixel. Point at the figure on the right of the row: `ran 0.5 of 318.3 ms`. The exaggeration flatters the *wrong* side of the argument. |
+| Someone says "you're just measuring Thread.sleep" | Correct, and it is the honest stand-in: `sleep` on a virtual thread unmounts exactly the way a socket read does. The mechanism on screen is the mechanism, not a simulation of it. |
 | Thread bomb dies at a surprising number | Say the number out loud and move on. It is machine-specific and the contrast is unaffected. |
 | The thread bomb does not die at all | Only possible on a machine whose thread limit is high enough that creation outruns the one-second sleep. Change `Duration.ofSeconds(1)` to `ofMinutes(1)` in the editor and run again — the past side dies for certain, and you simply stop before running the present side, which would now never finish. |
 | Break it shows an error in a panel | It could not reach the server. Press **Show the chart** and then **Break it** again — it rebinds the server each time, so a second attempt is a fresh start. The error stays inside the panel and takes nothing else down. |
@@ -276,7 +501,7 @@ comparison is invalid. Re-run one side to match.
 
 ## How it works
 
-### Tabs 1 and 2 run your code in a different JVM
+### Tabs 1–3 run your code in a different JVM
 
 The past-mode program deliberately exhausts the OS thread limit. Running it in the app's
 own process would take the window down with it. Instead the editor's contents are written
@@ -289,9 +514,9 @@ on the presenting machine. That runtime is jlinked **with `jdk.compiler` and `jd
 which the source launcher silently requires — `make verify` exists to catch that before it
 becomes a problem on stage.
 
-Two output lines are load-bearing: `Died at thread #N of M` and `Completed 1,000,000 tasks
-in Xs`. The app watches for those and promotes them to the punchline banner and the
-scoreboard. Edit them live and the demo still runs, you just lose the banner.
+Two output lines are load-bearing: `Died at thread #N of M` and `All N threads alive`. The
+app watches for those and promotes them to the punchline banner and the scoreboard. Edit
+them live and the demo still runs, you just lose the banner.
 
 ### Demo 2's two programs are the same program
 
@@ -302,16 +527,15 @@ differ, which is exactly the property the demo is claiming.
 
 That constrains the code in two ways worth knowing before you edit it:
 
-- **The progress print is one shared rule** — chatty below ten thousand, every hundred
-  thousand above it. Past gets its twenty lines of climb; present gets a fast blur and then
-  ten `completed:` lines while it drains. Neither side gets a print tuned for itself.
-- **`executor.close()` is called explicitly, not by try-with-resources.** With
-  try-with-resources, the `OutOfMemoryError` would unwind *through* `close()`, which waits
-  out two thousand one-second sleeps — the death message would arrive a second late, after
-  a visible stall. Calling `close()` inside the `try` lets the `catch` reach `System.exit`
-  while the corpses are still warm.
+- **The progress print is one shared rule** — one line every thousand threads. Past gets
+  two lines before it dies; present gets a thousand of them in a blur. Neither side gets a
+  print tuned for itself, and how much scrolls past is itself the comparison.
+- **Nothing ever completes.** Every thread sleeps for an hour, so the only number either
+  side can report is how many are alive at once. That is deliberate: with a short sleep the
+  past side would be measuring a race between creating threads and retiring them, and on a
+  generous machine it might never die at all.
 
-The past side's OOM arrives raw and unwrapped out of `executor.submit()` on the main
+The past side's OOM arrives raw and unwrapped out of `Thread.start()` on the main
 thread, so the console shows the real
 `java.lang.OutOfMemoryError: unable to create native thread` text rather than something the
 demo made up. The two `[warning][os,thread]` lines above it are the JVM's own, on stderr.
@@ -323,6 +547,8 @@ line of output. That is invisible in Thread Bomb, where the program then runs fo
 It is not invisible in a demo whose entire point is pressing Run three times in a row. So
 Threads 101 compiles the snippet in the background whenever the editor settles, and Run
 then only has to start a JVM: about **25 ms** to the first line instead of 250.
+Thread-per-Request shares the same `SourceCompiler`, for the same reason — its whole point
+is running it again after a live edit.
 
 If the snippet is not compiled yet, or the presenter has just broken it, the app silently
 falls back to the source launcher — same behaviour the other tab has always had, and it is
@@ -333,12 +559,67 @@ needs `jdk.compiler` — which it already did, for the source launcher. `make ve
 both, because neither failure would ever show up in `make run`.
 
 Console lines are tinted by which thread printed them. A name keeps its colour until the
-console is cleared, so `cook-1` looks the same in run #3 as it did in run #1 — otherwise
-comparing one run against the one above it would mean nothing. The colours are deliberately
-neither orange nor teal: those two mean "before Loom" and "after Loom" everywhere else in
-the talk, and a `cook-1` that looked orange would quietly say something untrue.
+console is cleared, so `Cook#1` looks the same in run #3 as it did in run #1 — otherwise
+comparing one run against the one above it would mean nothing. Across all six snippets
+exactly three names ever print — `Cook#1`, `Cook#2`, and `main` — which is exactly how many
+speaker colours there are. That is why the oven snippets reuse the two cooks rather than
+hiring a third: a fourth name wraps around and takes `Cook#1`'s colour. Adding one means
+adding `speaker-d` to both the light and dark palettes and to the console rules. The
+colours are deliberately neither orange nor teal: those two mean "before Loom" and "after
+Loom" everywhere else in the talk, and a `Cook#1` that looked orange would quietly say
+something untrue.
 
-### Why the settings on tab 3 are buttons, not dropdowns
+The tab finds the speaker with `Threads101Tab.SPEAKER`, which recognises two output shapes:
+a thread name followed by `->`, and one followed by `receives` or `serves`. Two Cooks,
+Two Cooks, Shared and `run() vs start()` speak in the kitchen; the oven snippets still use
+the arrow. A sixth
+snippet that invents a third verb runs perfectly well and prints in plain black until that
+pattern is taught the word.
+
+### Tab 4 reads the carrier out of `Thread.toString()`
+
+There is no public API for "which OS thread is running this virtual thread", and the demo
+does not reach for `jdk.internal.vm.Continuation`, an agent, or JFR to get one. It does not
+need to: the JDK already prints it.
+
+```
+mounted   VirtualThread[#23,req-0]/runnable@ForkJoinPool-1-worker-1
+parked    VirtualThread[#23,req-0]/timed_waiting
+```
+
+`FrameRecorder.carrierOf` takes everything after the last `@`, and treats its absence as
+"nothing is running this" — which is the whole of STEP 02. A platform thread answers with
+its own name, so both eras render on the same board with no special case. If a future
+runtime prints a shape the parser cannot read, it answers the literal `carrier?` rather
+than guessing: a wrong carrier name would make the board tell a story that did not happen.
+
+Everything else is derived from eight marks per request, taken on the request's own thread
+around each of the three blocking calls. `FrameRun` turns those into the lanes, the
+percentages, the headline and the STEP lines — one list of events, so the picture and the
+sentence under it cannot disagree. It has no JavaFX types in it and can be exercised without
+a window, the same bar `TraceView.parse` sets.
+
+**Two claims the tab is careful not to make.**
+
+- The lanes are *not* a continuous trace. Eight instants per request is what was measured,
+  and a mount between two of them would be invisible. At these latencies the JDK makes
+  exactly the transitions that are marked.
+- STEP 03 only says a carrier was picked up by somebody else when a mounted span for
+  another request genuinely overlaps the window. Otherwise it says the carrier went idle.
+  `FrameRun.focusRequest` prefers a request whose *first* call shows the handover, so that
+  steps 01–04 are the slide rather than a near miss.
+
+Under `Era.PAST` the pool is sized to the request count — one platform thread each. That is
+deliberately not tab 5's pool of 200: nothing should queue here, because queueing is tab 5's
+argument. What is left when nothing queues is exactly what one blocking call costs. The
+threads are named `pool-thread-N` rather than `worker-N` so they cannot be confused with the
+scheduler's carriers on the same board, which is the one thing this demo must not blur.
+
+`OrderServer` is untouched. Tab 4 calls `OrderService` directly, because a third
+instrumented handler shape in that file would quietly cost it the "past and present share a
+handler byte for byte" argument it exists to make.
+
+### Why the settings on tab 5 are buttons, not dropdowns
 
 **Requests** and **Concurrency** used to be `ComboBox`es. A JavaFX dropdown list lives in a
 separate native window, and on macOS that window intermittently paints blank: you click,
@@ -359,7 +640,7 @@ push the control row to three lines at presentation font sizes. If it ever glitc
 stage, click it a second time — and the same treatment would work there if you are willing
 to shorten the labels.
 
-### Tab 3 measures a real server
+### Tab 5 measures a real server
 
 `com.sun.net.httpserver` on loopback, ephemeral port. Every endpoint waits out its latency
 and returns JSON; the wait stands in for a database call. Changing era restarts the server

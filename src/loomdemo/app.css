@@ -48,7 +48,7 @@
     /*
      * Threads 101 tints console lines by which thread printed them. These are
      * deliberately NOT the past/future identity colours — orange and teal mean
-     * "before Loom" and "after Loom" all through the talk, and a cook-1 that looked
+     * "before Loom" and "after Loom" all through the talk, and a Cook#1 that looked
      * orange would quietly say something untrue.
      */
     -speaker-a: #5E35B1;
@@ -228,6 +228,11 @@
     -fx-text-fill: -workaround-on-accent;
 }
 
+.run-button.pinned {
+    -fx-background-color: -danger;
+    -fx-text-fill: white;
+}
+
 .run-button:hover {
     -fx-opacity: 0.9;
 }
@@ -300,6 +305,17 @@
 .mode-button:selected.workaround {
     -fx-background-color: -workaround-accent;
     -fx-text-fill: -workaround-on-accent;
+}
+
+/*
+ * Pinning is the one thing on the board that is neither era. It is the PRESENT era going
+ * wrong, so it cannot wear teal and must not wear the past's orange either — orange has meant
+ * "platform threads" all talk long, and this run has none. Red, and red only here, so the
+ * lanes below and this button are unmistakably the same subject.
+ */
+.mode-button:selected.pinned {
+    -fx-background-color: -danger;
+    -fx-text-fill: white;
 }
 
 /*
@@ -813,6 +829,142 @@
     -fx-font-size: 1.15em;
     -fx-font-weight: bold;
     -fx-text-fill: -ink;
+}
+
+/* ---------------------------------------------------------------- mount board */
+
+/*
+ * The Frame by Frame timeline. Two groups of lanes drawn against one time window: what each
+ * request was doing, and what each OS thread was doing about it.
+ *
+ * Everything here is sized in em so the board grows with presentation mode, and coloured
+ * from the era variables so dark mode needs no second palette. That is the whole reason the
+ * lanes are Regions in a Pane rather than shapes on a Canvas.
+ */
+
+.mount-board {
+    -fx-padding: 0.2em 0 0 0;
+}
+
+.lane-group {
+    -fx-spacing: 0.25em;
+    -fx-padding: 0.35em 0 0.35em 0;
+}
+
+.lane-row {
+    -fx-alignment: center-left;
+}
+
+/* Fixed widths on both ends, or the lanes would not line up between the two groups. */
+.lane-label {
+    -fx-font-family: "Menlo", "Monaco", "SF Mono", monospace;
+    -fx-font-size: 0.9em;
+    -fx-text-fill: -ink-muted;
+    -fx-min-width: 9.5em;
+    -fx-pref-width: 9.5em;
+}
+
+/* The request the step log is following. */
+.lane-label.focus {
+    -fx-text-fill: -ink;
+    -fx-font-weight: bold;
+}
+
+.lane-figure {
+    -fx-font-family: "Menlo", "Monaco", "SF Mono", monospace;
+    -fx-font-size: 0.82em;
+    -fx-text-fill: -ink-muted;
+    /* em resolves against this label's OWN 0.82em font, so these are smaller than they look. */
+    -fx-min-width: 27em;
+    -fx-pref-width: 27em;
+    -fx-alignment: center-right;
+}
+
+.mount-lane {
+    -fx-background-color: -surface-sunken;
+    -fx-border-color: -hairline;
+    -fx-border-width: 1;
+    -fx-background-radius: 0.25em;
+    -fx-border-radius: 0.25em;
+    -fx-min-height: 1.6em;
+    -fx-pref-height: 1.6em;
+}
+
+/* Twenty-four request rows at full height do not fit a projector. */
+.mount-lane.dense {
+    -fx-min-height: 1em;
+    -fx-pref-height: 1em;
+}
+
+.lane-block {
+    -fx-background-radius: 0.15em;
+}
+
+/*
+ * Mounted and carrier-busy are the same fact seen from two sides, so they are the same
+ * colour: full-strength identity accent, meaning "a CPU is actually running this".
+ */
+.lane-mounted.past, .lane-carrier.past       { -fx-background-color: -past-accent; }
+.lane-mounted.future, .lane-carrier.future   { -fx-background-color: -future-accent; }
+
+/*
+ * Waiting. Under past this is an OS thread parked in the kernel and under present it is
+ * nothing at all, which is why the wash is the era's own — the colour says whose wait it is,
+ * and the emptiness says what it costs.
+ */
+.lane-parked.past   { -fx-background-color: -past-wash; }
+.lane-parked.future { -fx-background-color: -future-wash; }
+
+/*
+ * Waiting, and unable to let go. This is the one block on the board that means the same thing
+ * in every era, so unlike everything above it there is no era variant: a carrier held by a
+ * request that is doing nothing is the same failure whoever is holding it. It appears twice
+ * for the same stretch of time — once on the request that could not unmount, and once on the
+ * carrier it took down with it — which is the point being made.
+ */
+.lane-pinned { -fx-background-color: -danger; }
+
+/* A carrier that spent the run held, and the request that would not let go of one. */
+.lane-label.pinned {
+    -fx-text-fill: -danger;
+    -fx-font-weight: bold;
+}
+
+/*
+ * The parked-stack panels borrow TraceView from the Break it view, where a frame of ours is
+ * where the failure happened and is therefore red. Nothing has failed here — the request is
+ * simply waiting — so in this view our own frames are emphasis, not alarm. Everything else
+ * about the panel, including the framework frames receding into grey, is unchanged.
+ */
+.stack-view .trace-console .trace-mine {
+    -fx-fill: -ink;
+    -fx-font-weight: bold;
+}
+
+/* ------------------------------------------------------------------ step log */
+
+/*
+ * Coloured by what the line CLAIMS, never by which era wrote it. "The carrier is free
+ * instantly" and "the thread is not free" occupy the same position in the log and are
+ * opposite news, so an era colour would be wrong half the time. See FrameRun.Step.
+ */
+.stream-console .step-plain {
+    -fx-fill: -ink;
+}
+
+.stream-console .step-good {
+    -fx-fill: -future-ink;
+    -fx-font-weight: bold;
+}
+
+.stream-console .step-cost {
+    -fx-fill: -past-ink;
+    -fx-font-weight: bold;
+}
+
+.stream-console .step-hint {
+    -fx-fill: -ink-muted;
+    -fx-font-style: italic;
 }
 
 /* --------------------------------------------------------------------- chart */

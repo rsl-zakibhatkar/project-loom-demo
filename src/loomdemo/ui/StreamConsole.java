@@ -14,7 +14,7 @@ import org.fxmisc.richtext.StyleClassedTextArea;
 /**
  * Output console where individual lines can be coloured.
  *
- * <p>Threads 101 needs to tint {@code cook-1} and {@code cook-2} differently so the
+ * <p>Threads 101 needs to tint {@code Cook#1} and {@code Cook#2} differently so the
  * interleaving is legible from the back of the room, and a plain {@code TextArea} has one
  * text fill for its entire contents. This is the same console in every other respect —
  * monospaced, projector-sized, auto-scrolling, em-based fonts that compose with
@@ -118,6 +118,18 @@ public final class StreamConsole {
     public void clear() {
         area.replaceText("");
         elapsed.setText("");
+    }
+
+    /**
+     * Put the left margin back in view.
+     *
+     * <p>Needed by any caller that rebuilds its log rather than appending to it: the area
+     * keeps its horizontal offset across a {@code replaceText}, so a console that was
+     * scrolled right once comes back showing "EP 01" where it should say "STEP 01". Vertical
+     * position is left alone — the newest line is still the one worth seeing.
+     */
+    public void scrollToStart() {
+        area.scrollXToPixel(0);
     }
 
     public void setElapsedText(String text) {

@@ -14,7 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The three-way snippet switch for Threads 101.
+ * The snippet switch for Threads 101.
  *
  * <p>Structurally this is {@link ModeToggle} widened past two options. It keeps the same
  * three defences, all of which are load-bearing on stage: a suppression flag so
@@ -56,7 +56,7 @@ public final class SnippetPicker {
                 return;
             }
             if (is == null) {
-                // Clicking the already-selected button would otherwise deselect all three.
+                // Clicking the already-selected button would otherwise deselect all of them.
                 syncButtons(snippet.get());
                 return;
             }
