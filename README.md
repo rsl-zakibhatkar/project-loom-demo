@@ -165,6 +165,12 @@ The app opens here. Six snippets, left to right, in the order you want them.
    `puts X in` lines run back to back, and `inside` is a single reference, so the second
    one does not stack a dish on top of the first — it destroys it. The cook whose dish
    went in the bin is asleep for another 200 ms, still believing it is baking.
+   Most runs show a second ending somewhere in the six orders: `wanted lasagna, got null`.
+   That is the same one slot from the other side. Coming back for a dish is two steps, a
+   read and then a clear, and every cook clears unconditionally — so a cook who gets back
+   second finds an oven the other one has already emptied, and walks off with nothing.
+   Nothing threw there either. Both endings are the same bug: one reference, and no rule
+   about who touches it when.
 6. **One Oven, Locked** is the same program with one word added: `bake` is
    `synchronized`. Say that before you run it, and offer to diff the two sources — every
    other difference between them is a comment. Now every `puts X in` is followed by that
