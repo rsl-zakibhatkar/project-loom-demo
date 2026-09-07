@@ -160,17 +160,16 @@ The app opens here. Six snippets, left to right, in the order you want them.
 5. Now switch to **One Oven**. The two cooks no longer just take turns talking — they
    share one object. Read the first two lines out loud: two threads, two colours, the
    *same* `Oven@…` on both. That is the heap, and it is the only copy there is. Then let
-   the run finish. `reaches in for lasagna, pulls out risotto` and
-   `throws out risotto, puts lasagna in` are not error handling — nothing threw. Both
-   cooks did exactly what the code said. Worth landing the second one: `inside` is a
-   single reference, so overwriting it does not stack a dish on top of another — it
-   destroys one. The cook whose dish went in the bin is asleep for another 200 ms,
-   still believing it is baking.
+   the run finish. `wanted risotto, got lasagna` is not error handling — nothing threw.
+   Both cooks did exactly what the code said. Worth landing where it went wrong: two
+   `puts X in` lines run back to back, and `inside` is a single reference, so the second
+   one does not stack a dish on top of the first — it destroys it. The cook whose dish
+   went in the bin is asleep for another 200 ms, still believing it is baking.
 6. **One Oven, Locked** is the same program with one word added: `bake` is
    `synchronized`. Say that before you run it, and offer to diff the two sources — every
    other difference between them is a comment. Now every `puts X in` is followed by that
-   same cook's `takes X out`, and the two spoiled branches — still sitting right there in
-   the code — never run. Worth naming: the lock
+   same cook's own `wanted X, got X`, and no cook is ever inside the oven while another
+   one is baking. Worth naming: the lock
    *is* the oven. The object they share is the object they take turns on. Who gets it
    first still varies run to run; what never happens again is two cooks inside it at once.
 7. Finish on **Who's in my JVM?** — a program that starts no threads at all and still
@@ -254,13 +253,18 @@ tab is where the cost arrives.
 `REQUEST_ID` is declared `static final`, so there is only one of it — isn't a static field
 shared? Switch to this snippet to answer it.
 
-4. **Run**. Two threads, and the first two lines print the **same** `java.lang.ThreadLocal@…`
-   object — so yes, there is exactly one, shared. Yet look at the last four lines.
-5. The plain `static String shared` collides: one thread reads back the *other* thread's
-   value (last writer wins on the single slot — the same shared-state race as the Oven in
-   Demo 1). The `threadlocal` line right beside it reads each thread's **own** value every
-   time. Same shared key, a private value per thread — the ThreadLocal object is not a box,
-   it is a key into a map that lives inside each `Thread`.
+4. **Before you run it**, scroll to `OrderService` and read the signatures out loud:
+   `checkout`, `findUser`, `findOrder`, `chargeCard`, `log` — not one of them takes a
+   request id. Now **Run**. The two requests overlap: `http-2` arrives 60 ms in, while
+   `http-1` is still inside its first database call.
+5. Read the `threadlocal` column straight down: every line carries its *own* request's id —
+   `req-42` on all three of `http-1`'s lines, `req-77` on all three of `http-2`'s — in a
+   class that was never told which request it was serving. Then read the `static` column
+   beside it: **`http-1`'s own lines say `req-77`**. One slot, last writer wins — the same
+   shared-state race as the Oven in Demo 1, except here it is the wrong customer's id on
+   your trace. Finally, go back to the two `@…` values at the top: both threads printed the
+   **same** object. One object, two threads, no `synchronized` anywhere — so why did only
+   one of those two columns break? Hand that question to the next slide.
 
 **When It Breaks** — *real stack traces* and *trivial to debug*. Switch to it with the
 picker (the confirm bar appears first if you have edited the code, exactly like Threads 101).

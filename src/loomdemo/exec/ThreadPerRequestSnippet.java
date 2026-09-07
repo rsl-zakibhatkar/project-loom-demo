@@ -16,9 +16,12 @@ package loomdemo.exec;
  *   <li>{@link #HANDLER} — the sequential handler with a request id carried on a
  *       {@code ThreadLocal}: <strong>sequential, readable code</strong> and
  *       <strong>ThreadLocal context</strong>.</li>
- *   <li>{@link #THREAD_LOCAL} — how that context stays per-request: one shared
- *       {@code ThreadLocal} key, a private value per thread, next to a plain {@code static}
- *       field that collides. The mechanism behind {@link #HANDLER}.</li>
+ *   <li>{@link #THREAD_LOCAL} — how that context stays per-request. The same request
+ *       chain, with the id stored twice over: a plain {@code static} field beside a
+ *       {@code ThreadLocal}, written back to back. Two requests overlap, so one run shows
+ *       the id reaching code nobody handed it to, the static field clobbered by the other
+ *       request, and both threads holding the same {@code ThreadLocal} object. The
+ *       mechanism behind {@link #HANDLER}.</li>
  *   <li>{@link #WHEN_IT_BREAKS} — the same handler, but the payment gateway throws: the
  *       stack trace is the whole request, and the failed request names itself.
  *       <strong>Real stack traces</strong> and <strong>trivial to debug</strong>.</li>
@@ -117,66 +120,90 @@ public enum ThreadPerRequestSnippet {
 
     THREAD_LOCAL(
             "ThreadLocal",
-            "One shared key, a private value per thread.",
+            "One id stored two ways — and only one of them survives a second request.",
             """
-            /*
-             * THREADLOCAL — one shared object, a private value per thread.
-             *
-             * The puzzle: REQUEST_ID over in The Handler is declared `static final`, so
-             * there is only ONE of it, shared by every thread — and both threads below
-             * even print the same object. So how did each request read back its OWN id?
-             *
-             * A ThreadLocal is not a box that holds a value. It is a KEY. The values live
-             * in a hidden map inside each Thread; get() and set() use this one shared key
-             * to reach the map belonging to the CURRENT thread. One key, one map per thread.
-             *
-             * The plain `static String shared` beside it is the control. It is static too —
-             * one field, one slot — but it holds the value directly, so the threads clobber
-             * each other. That is the whole difference: a shared value, versus a shared key
-             * into per-thread values.
-             */
             public class Demo {
 
-                static String shared;                                          // one slot, holds a value
-                static final ThreadLocal<String> local = new ThreadLocal<>();  // one key, per-thread values
-
                 public static void main(String[] args) throws InterruptedException {
-                    Thread a = new Thread(() -> run("A's value"), "thread-A");
-                    Thread b = new Thread(() -> run("B's value"), "thread-B");
+                    Thread a = new Thread(() -> serve("42"), "http-1");
+                    Thread b = new Thread(() -> serve("77"), "http-2");
                     a.start();
+                    Thread.sleep(60);          // request 2 arrives while request 1 is in flight
                     b.start();
                     a.join();
                     b.join();
                 }
 
-                static void run(String mine) {
-                    String me = Thread.currentThread().getName();
+                static void serve(String orderId) {
+                    // Set once, at the top of the request. Both fields, same value.
+                    RequestContext.staticId = "req-" + orderId;
+                    RequestContext.localId.set("req-" + orderId);
 
-                    // The SAME object, printed by both threads: one shared ThreadLocal.
-                    System.out.println(me + " -> we both hold " + local);
+                    System.out.println(Thread.currentThread().getName()
+                            + "  -> request in.   our ThreadLocal object = @"
+                            + Integer.toHexString(System.identityHashCode(RequestContext.localId)));
 
-                    // Each thread writes ITS OWN value into both.
-                    shared = mine;
-                    local.set(mine);
-                    System.out.println(me + " -> wrote '" + mine + "' to both");
-
-                    // Pause, so the other thread writes before either of us reads back.
-                    sleep(200);
-
-                    // shared: one slot for everyone — last writer wins, so this may not be ours.
-                    System.out.println(me + " -> shared field  = " + shared);
-                    // local: our own slot, keyed by this thread — always ours.
-                    System.out.println(me + " -> threadlocal   = " + local.get());
-                }
-
-                static void sleep(long ms) {
                     try {
-                        Thread.sleep(ms);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
+                        new OrderService().checkout(orderId);
+                    } finally {
+                        RequestContext.localId.remove();   // the locker doesn't empty itself
                     }
                 }
             }
+
+            /*
+             * Where the request context lives. Two fields, two strategies.
+             * This is, in miniature, what SLF4J's MDC and Spring's RequestContextHolder are.
+             */
+            final class RequestContext {
+
+                static String staticId;                                          // one slot, holds a VALUE
+
+                static final ThreadLocal<String> localId = new ThreadLocal<>();  // one KEY, per-thread values
+            }
+
+            /* Ordinary business code. Look at what is NOT in any of these signatures. */
+            class OrderService {
+
+                void checkout(String orderId) {
+                    User user = findUser(orderId);
+                    Order order = findOrder(user);
+                    chargeCard(user, order);
+                }
+
+                User findUser(String id) {
+                    io(100);                                   // the database
+                    log("findUser(" + id + ")");
+                    return new User(id);
+                }
+
+                Order findOrder(User user) {
+                    io(100);
+                    log("findOrder(" + user.id() + ")");
+                    return new Order("ord-" + user.id());
+                }
+
+                void chargeCard(User user, Order order) {
+                    io(100);
+                    log("chargeCard(" + order.id() + ")");
+                }
+
+                // Nobody handed this method a request id either. It reads RequestContext.
+                void log(String message) {
+                    System.out.printf("%-7s  ->  static=[%s]  threadlocal=[%s]   %s%n",
+                            Thread.currentThread().getName(),
+                            RequestContext.staticId,
+                            RequestContext.localId.get(),
+                            message);
+                }
+
+                private void io(long ms) {
+                    try { Thread.sleep(ms); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                }
+            }
+
+            record User(String id) {}
+            record Order(String id) {}
             """),
 
     WHEN_IT_BREAKS(

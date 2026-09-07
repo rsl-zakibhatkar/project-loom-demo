@@ -211,7 +211,8 @@ public enum Snippet {
              * both of them are holding a reference to the same one. Watch the first two
              * lines: two different threads, printing the same object.
              *
-             * Then watch the oven. A cook can look — but looking is not waiting.
+             * Then watch the oven. Each cook puts a dish in and comes back for it — and
+             * what they get back is whatever is in there by the time they return.
              */
             public class Demo {
 
@@ -260,15 +261,8 @@ public enum Snippet {
                     // only ever one of it.
                     String me = Thread.currentThread().getName();
 
-                    // A glance through the door on the way past. It chooses what gets
-                    // said, never what gets done: the write below runs either way, and
-                    // the dish it overwrites is the only reference anyone had.
-                    if (inside == null) {
-                        System.out.println(me + " -> puts " + dish + " in");
-                    } else {
-                        System.out.println(me + " -> throws out " + inside
-                                + ", puts " + dish + " in");
-                    }
+                    // Dish goes in. No checking, no deciding - this is the whole step.
+                    System.out.println(me + " -> puts " + dish + " in");
                     inside = dish;
 
                     try {
@@ -281,14 +275,9 @@ public enum Snippet {
 
                     // Back for the dish. Whatever is in there now is what comes out —
                     // this cook has no way to know it is still their own.
-                    String out = inside == null ? "nothing" : inside;
+                    String out = inside;
                     inside = null;
-                    if (dish.equals(out)) {
-                        System.out.println(me + " -> takes " + dish + " out");
-                    } else {
-                        System.out.println(me + " -> reaches in for " + dish
-                                + ", pulls out " + out);
-                    }
+                    System.out.println(me + " -> wanted " + dish + ", got " + out);
                 }
             }
             """),
@@ -303,8 +292,8 @@ public enum Snippet {
              * bake() is now synchronized. The lock is the Oven itself: the one object
              * both cooks share is the one thing they now have to take turns on.
              *
-             * Both of the branches that fired a moment ago are still in the code below.
-             * Neither of them can run any more.
+             * Nothing else changed. Every "puts X in" is now followed by that same cook
+             * getting their own dish back — and the two cooks never overlap.
              */
             public class Demo {
 
@@ -355,15 +344,8 @@ public enum Snippet {
                     // only ever one of it.
                     String me = Thread.currentThread().getName();
 
-                    // The same glance — except now it can only ever find an empty
-                    // oven, because nobody else can be inside it. The else branch below
-                    // is still here, and can no longer run.
-                    if (inside == null) {
-                        System.out.println(me + " -> puts " + dish + " in");
-                    } else {
-                        System.out.println(me + " -> throws out " + inside
-                                + ", puts " + dish + " in");
-                    }
+                    // Dish goes in. No checking, no deciding - this is the whole step.
+                    System.out.println(me + " -> puts " + dish + " in");
                     inside = dish;
 
                     try {
@@ -376,14 +358,9 @@ public enum Snippet {
 
                     // Back for the dish, and it can only be theirs: nobody could reach
                     // the oven while the timer was running.
-                    String out = inside == null ? "nothing" : inside;
+                    String out = inside;
                     inside = null;
-                    if (dish.equals(out)) {
-                        System.out.println(me + " -> takes " + dish + " out");
-                    } else {
-                        System.out.println(me + " -> reaches in for " + dish
-                                + ", pulls out " + out);
-                    }
+                    System.out.println(me + " -> wanted " + dish + ", got " + out);
                 }
             }
             """),
